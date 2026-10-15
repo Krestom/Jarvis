@@ -12,12 +12,14 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, ErrorEvent
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jarvis.agent.queue import UserSessionGate
 from jarvis.ai import AIProvider
 from jarvis.bot.handlers import build_routers
 from jarvis.bot.middlewares import register_middlewares
 from jarvis.config.settings import Settings
 from jarvis.db.session import session_scope
 from jarvis.logging_setup import get_correlation_id
+from jarvis.research import create_search_provider
 from jarvis.security.auth import Authorizer
 from jarvis.services.improvements import ImprovementService
 
@@ -59,6 +61,14 @@ def create_dispatcher(
     dispatcher["ai"] = ai
     dispatcher["session_factory"] = session_factory
     dispatcher["transcription"] = transcription
+    dispatcher["agent_gate"] = UserSessionGate(settings)
+    try:
+        dispatcher["search_provider"] = create_search_provider(settings)
+    except ValueError as error:
+        log.error("web search provider is misconfigured, search disabled: %s", error)
+        from jarvis.research.none import NoneSearchProvider
+
+        dispatcher["search_provider"] = NoneSearchProvider()
 
     authorizer = Authorizer(settings.telegram_allowed_user_ids)
     register_middlewares(dispatcher, session_factory, authorizer)

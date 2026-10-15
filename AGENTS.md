@@ -51,5 +51,8 @@ coding-агент (OpenCode и т.п.) работает с **improvement backlog
 ## Документация
 
 - Устройство backlog, `/diagnostics` и `/export_issues`: `docs/diagnostics.md`.
+- AI-агент (инструменты, роутинг «Джарвис», бюджеты, отмена, web-поиск):
+  `docs/agent.md`. Агент работает только через типизированные инструменты и
+  никогда не подключается к БД в обход приложения.
 - Архитектура: `docs/architecture.md`. Security-модель: `docs/security.md`.
 - План и журнал Stage 2: `docs/stage-2-audit.md`.

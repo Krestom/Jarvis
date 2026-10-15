@@ -53,7 +53,7 @@ async def menu_main(callback: CallbackQuery) -> None:
 
 async def menu_search(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
     store = ConversationStore(ConversationRepository(session), settings)
-    await store.set(callback.from_user.id, Flow.SEARCH_WAIT)
+    await store.set(callback.from_user.id, Flow.SEARCH_WAIT, step="asked")
     await callback.answer()
     await callback.message.answer("🔎 Напишите, что искать.")
 

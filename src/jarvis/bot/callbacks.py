@@ -75,5 +75,11 @@ class ImpCB(CallbackData, prefix="imp"):
     page: int = 0
 
 
+class AgentPickCB(CallbackData, prefix="ap"):
+    """Выбор сущности из кандидатов агента (индекс в сохранённом контексте)."""
+
+    index: int
+
+
 def uuid_hex(value) -> str:
     return str(value).replace("-", "")

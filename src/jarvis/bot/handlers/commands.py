@@ -7,6 +7,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jarvis.agent.queue import UserSessionGate
 from jarvis.ai import AIProvider
 from jarvis.bot.keyboards import main_menu, tasks_menu_keyboard
 from jarvis.bot.texts import CANCELLED_TEXT, HELP_TEXT, START_TEXT
@@ -30,19 +31,26 @@ async def cmd_help(message: Message) -> None:
     await message.answer(HELP_TEXT, reply_markup=main_menu())
 
 
-async def cmd_cancel(message: Message, session: AsyncSession, settings: Settings) -> None:
+async def cmd_cancel(
+    message: Message, session: AsyncSession, settings: Settings, agent_gate: UserSessionGate
+) -> None:
     user_id = message.from_user.id
+    # Сначала останавливаем бегущий агентский запрос (если он есть).
+    cancelled_agent = agent_gate.request_cancel(user_id)
     store = ConversationStore(ConversationRepository(session), settings)
     state = await store.get_active(user_id)
     if state is not None and state.pending_operation_id is not None:
         await ConfirmationService(session, settings).cancel(user_id, state.pending_operation_id)
     await store.clear(user_id)
-    await message.answer(CANCELLED_TEXT, reply_markup=main_menu())
+    text = CANCELLED_TEXT
+    if cancelled_agent:
+        text = "Останавливаю текущий запрос. " + text
+    await message.answer(text, reply_markup=main_menu())
 
 
 async def cmd_search(message: Message, session: AsyncSession, settings: Settings) -> None:
     store = ConversationStore(ConversationRepository(session), settings)
-    await store.set(message.from_user.id, Flow.SEARCH_WAIT)
+    await store.set(message.from_user.id, Flow.SEARCH_WAIT, step="asked")
     await message.answer("Напишите, что искать.")
 
 

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import uuid
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 UIAction = Literal[
     "search",
@@ -69,3 +70,36 @@ class Interpretation(BaseModel):
     reply: str | None = None
     improvement_hypothesis: ImprovementHypothesis | None = None
     ui_request: UIRequest | None = None
+
+
+# --- Агентский цикл (Stage 3): шаг планирования и UI-описания ----------------
+
+
+class EntityChoice(BaseModel):
+    """Выбор из реальных кандидатов; id проверяет сервер."""
+
+    component: Literal["entity_choice"]
+    entity_kind: Literal["task", "project", "knowledge"]
+    entity_ids: list[uuid.UUID] = Field(min_length=1, max_length=6)
+    prompt: str | None = Field(default=None, max_length=200)
+
+
+AgentUI = Annotated[EntityChoice | UIRequest, Field(discriminator="component")]
+
+
+class PlanStep(BaseModel):
+    """Один шаг агента: вызвать инструмент или дать финальный ответ."""
+
+    type: Literal["tool_call", "reply"]
+    tool: str | None = Field(default=None, max_length=40)
+    args: dict[str, Any] = Field(default_factory=dict)
+    text: str | None = Field(default=None, max_length=4000)
+    ui: AgentUI | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> PlanStep:
+        if self.type == "tool_call" and not self.tool:
+            raise ValueError("tool_call требует поле tool")
+        if self.type == "reply" and not (self.text or "").strip():
+            raise ValueError("reply требует непустой text")
+        return self

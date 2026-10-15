@@ -42,3 +42,30 @@ def redact(text: str) -> str:
     for pattern, replacement in _PATTERNS:
         text = pattern.sub(replacement, text)
     return text
+
+
+# Слова-маркеры, по которым текст похож на креды/секреты.
+_SECRET_HINTS = (
+    "пароль",
+    "password",
+    "passwd",
+    "токен",
+    "token",
+    "api key",
+    "api-key",
+    "секрет",
+    "private key",
+    "креды",
+    "creds",
+    "credential",
+)
+
+
+def looks_like_secret(text: str) -> bool:
+    """Похож ли текст на секрет/креды (для безопасного уровня чувствительности)."""
+    if not text:
+        return False
+    lowered = text.lower()
+    if any(hint in lowered for hint in _SECRET_HINTS):
+        return True
+    return any(pattern.search(text) for pattern, _ in _PATTERNS)

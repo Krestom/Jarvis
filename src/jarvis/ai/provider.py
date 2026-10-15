@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
-from jarvis.ai.schemas import Interpretation
+from jarvis.ai.schemas import Interpretation, PlanStep
 
 
 class AIError(Exception):
@@ -28,6 +28,7 @@ class InterpreterContext:
     active_flow: str | None = None
     draft: dict[str, Any] | None = None
     session_id: str | None = None  # для x-opencode-session (prompt caching)
+    usage: dict[str, Any] | None = None  # usage последнего вызова (если провайдер отдал)
 
 
 class AIProvider(Protocol):
@@ -36,3 +37,7 @@ class AIProvider(Protocol):
     async def interpret(self, text: str, context: InterpreterContext) -> Interpretation: ...
 
     async def chat_reply(self, text: str, context: InterpreterContext) -> str: ...
+
+    async def plan(
+        self, messages: list[dict[str, str]], context: InterpreterContext
+    ) -> PlanStep: ...

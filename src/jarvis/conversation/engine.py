@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from html import escape as html_escape
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +44,9 @@ from jarvis.services.drafts import KnowledgeDraft, TaskDraft
 from jarvis.services.improvements import ImprovementService
 from jarvis.services.search import SearchHit, SearchService
 from jarvis.services.tasks import TASK_VIEWS, TaskService
+
+if TYPE_CHECKING:
+    from jarvis.agent.queue import UserSessionGate
 
 log = logging.getLogger(__name__)
 
@@ -83,15 +86,27 @@ class EngineOutcome:
     awaiting_secret: bool = False
     force_save: bool = False
     ui_actions: list[str] = field(default_factory=list)
+    entity_choices: list = field(default_factory=list)
+    entity_choice_prompt: str | None = None
     task_choices: list = field(default_factory=list)
     task_choices_action: str = "comment_choose"
 
 
 class ConversationEngine:
-    def __init__(self, session: AsyncSession, settings: Settings, ai: AIProvider) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        settings: Settings,
+        ai: AIProvider,
+        *,
+        gate: UserSessionGate | None = None,
+        search_provider=None,
+    ) -> None:
         self._session = session
         self._settings = settings
         self._ai = ai
+        self._gate = gate
+        self._search_provider = search_provider
         self._store = ConversationStore(ConversationRepository(session), settings)
         self._confirmation = ConfirmationService(session, settings)
         self._catalog = CatalogService(session)
@@ -114,9 +129,8 @@ class ConversationEngine:
 
         state = await self._store.get_active(telegram_user_id)
 
-        if state is not None and state.flow == Flow.SEARCH_WAIT:
-            return await self._do_search(telegram_user_id, text, page=0)
-
+        # Жёсткие пошаговые сценарии (значения секретов, файлы, редакторы):
+        # они не сбиваются ни агента, ни поиском; выход — /cancel.
         if state is not None and state.flow == Flow.EDIT_PENDING:
             return await self._handle_edit(telegram_user_id, state, text)
 
@@ -195,6 +209,28 @@ class ConversationEngine:
                 {"comment_id": comment_id, "task_id": task_id, "content": text[:4000]},
             )
 
+        # --- Stage 3: AI-агент ---
+        # Обращение по имени и продолжение агентского контекста имеют приоритет
+        # над поиском, эвристиками и fallback'ами (но не над пошаговыми
+        # сценариями выше — их нельзя сбивать).
+        if self._agent_enabled():
+            from jarvis.agent.routing import AGENT_FLOW, invokes_jarvis
+
+            if state is not None and state.flow == AGENT_FLOW:
+                return await self._run_agent(telegram_user_id, text)
+            if invokes_jarvis(text):
+                return await self._run_agent(telegram_user_id, text)
+
+        # Поиск ждёт ввод только пока пользователь его не ввёл (step=asked).
+        # Когда результаты уже показаны (step=results), обычный текст
+        # обрабатывается как раньше — состояние нужно лишь для пагинации.
+        if (
+            state is not None
+            and state.flow == Flow.SEARCH_WAIT
+            and state.step == "asked"
+        ):
+            return await self._do_search(telegram_user_id, text, page=0)
+
         if looks_like_search(text):
             return await self._do_search(
                 telegram_user_id, extract_search_query(text), page=0
@@ -214,6 +250,9 @@ class ConversationEngine:
             )
 
         await self._capture_hypothesis(interpretation)
+        if interpretation.intent == "unknown" and self._agent_enabled():
+            # Раньше «не понял» был тупиком; агент попробует реально помочь.
+            return await self._run_agent(telegram_user_id, text)
         return await self._route(telegram_user_id, text, interpretation, context, source)
 
     async def search_page(self, telegram_user_id: int, page: int) -> EngineOutcome:
@@ -543,6 +582,41 @@ class ConversationEngine:
         )
         return EngineOutcome(preview, pending_op_id=operation_id)
 
+    # --- Stage 3: агент ---
+
+    def _agent_enabled(self) -> bool:
+        return self._settings.agent_enabled and getattr(self._ai, "name", "none") != "none"
+
+    async def _run_agent(self, telegram_user_id: int, text: str) -> EngineOutcome:
+        from jarvis.agent.orchestrator import AgentService
+
+        service = AgentService(
+            self._session,
+            self._settings,
+            self._ai,
+            gate=self._gate,
+            search_provider=self._search_provider,
+            correlation_id=get_correlation_id(),
+        )
+        try:
+            result = await service.run(telegram_user_id, text)
+        except Exception:  # noqa: BLE001 - агент не должен ронять обработку апдейта
+            log.exception("agent run failed")
+            return EngineOutcome(
+                "Не получилось выполнить агентский запрос. Попробуйте ещё раз позже.",
+                menu=self._menu_flag(),
+            )
+        return EngineOutcome(
+            result.text,
+            pending_op_id=result.pending_operation_id,
+            ui_actions=result.quick_actions,
+            entity_choices=[
+                candidate.model_dump(mode="json") for candidate in result.entity_choices
+            ],
+            entity_choice_prompt=result.choice_prompt,
+            menu=self._menu_flag() and not result.quick_actions,
+        )
+
     # --- Improvement backlog ---
 
     async def _capture_hypothesis(self, interpretation: Interpretation) -> None:
@@ -745,7 +819,10 @@ class ConversationEngine:
         offset = page * SEARCH_PAGE_SIZE
         hits = await self._search.search(query, limit=SEARCH_PAGE_SIZE, offset=offset)
         await self._store.set(
-            telegram_user_id, Flow.SEARCH_WAIT, data={"query": query, "page": page}
+            telegram_user_id,
+            Flow.SEARCH_WAIT,
+            step="results",
+            data={"query": query, "page": page},
         )
         return EngineOutcome("", search_hits=hits, search_query=query, search_page=page)
 

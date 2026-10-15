@@ -6,6 +6,7 @@ from aiogram.types import Message
 
 from jarvis.bot.formatting import esc, split_message
 from jarvis.bot.keyboards import (
+    agent_entity_keyboard,
     cancel_flow_keyboard,
     comment_target_keyboard,
     confirm_keyboard,
@@ -66,6 +67,12 @@ async def send_outcome(message: Message, outcome: EngineOutcome) -> None:
             reply_markup=comment_target_keyboard(
                 outcome.task_choices, action=outcome.task_choices_action
             ),
+        )
+
+    if outcome.entity_choices:
+        await message.answer(
+            outcome.entity_choice_prompt or "Уточните, что имелось в виду:",
+            reply_markup=agent_entity_keyboard(outcome.entity_choices),
         )
 
 

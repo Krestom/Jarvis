@@ -80,6 +80,29 @@ def quick_actions_keyboard(actions) -> InlineKeyboardMarkup | None:
     return builder.as_markup()
 
 
+def agent_entity_keyboard(candidates) -> InlineKeyboardMarkup:
+    """Кнопки выбора реальных сущностей: только серверный индекс, id — в контексте."""
+    from jarvis.bot.callbacks import AgentPickCB
+
+    builder = InlineKeyboardBuilder()
+    for index, candidate in enumerate(candidates):
+        title = str(candidate.get("title") or "—")[:40]
+        kind = {"task": "✅", "project": "🗂", "knowledge": "📚"}.get(
+            str(candidate.get("kind")), "•"
+        )
+        builder.add(
+            InlineKeyboardButton(
+                text=f"{index + 1}. {kind} {title}",
+                callback_data=AgentPickCB(index=index).pack(),
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def confirm_keyboard(operation_id: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.add(

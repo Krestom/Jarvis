@@ -38,7 +38,7 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 │  middlewares.py: correlation id → dedup → allow-list → session│
 │  handlers/: commands, diagnostics, menu, confirmations, tasks,│
 │             knowledge, documents, secrets, search, voice,     │
-│             free_text                                          │
+│             agent (выбор сущностей), free_text                │
 │  render.py / keyboards.py / formatting.py / texts.py          │
 └───────────────┬───────────────────────────────────────────────┘
                 ▼
@@ -48,10 +48,21 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 │  state.py, flows.py       │   │  opencode_go.py,       │
 │  preview.py, dates.py,    │   │  none.py, fake.py      │
 │  heuristics.py            │   └────────────────────────┘
-│  heuristics.py            │   ┌ transcription/ (адаптер)┐
-└───────────────┬───────────┘   │  provider.py, fake.py,  │
-                │               │  openai_compatible.py   │
-                │               └─────────────────────────┘
+│                           │   ┌ transcription/ ───────┐
+│                           │──▶│  provider.py, fake.py, │
+│                           │   │  openai_compatible.py  │
+│                           │   └────────────────────────┘
+│                           │   ┌ agent/ (Stage 3) ─────┐
+│                           │──▶│  orchestrator.py       │
+└───────────────┬───────────┘   │  tools.py, budget.py,  │
+                │               │  queue.py, routing.py, │
+                │               │  prompts.py, schemas.py│
+                │               └───────────┬────────────┘
+                │                           │
+                │               ┌ research/ ───┴─────────┐
+                │               │  provider.py (Protocol)│
+                │               │  none.py, fake.py      │
+                │               └────────────────────────┘
                 ▼
 ┌────────────────── services/ ──────────────────┐
 │  confirmation.py (pending-операции)           │
@@ -120,6 +131,11 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
    `ui_request` (`quick_actions`): backend собирает кнопки строго из allow-list
    `UI_ACTION_BUTTONS` (`bot/keyboards.py`), callback'и формирует сервер —
    модель кнопок не рисует.
+   Явное обращение «Jarvis/Джарвис», продолжение агентского контекста
+   (`conversation_states.flow = agent_context`) и `intent=unknown` уходят в
+   AI-агента (`agent/orchestrator.py`): LLM-план → типизированные инструменты →
+   ответ/UI — в рамках бюджета, с очередью по пользователю и отменой.
+   Подробности: [docs/agent.md](agent.md).
 5. **Pending-операция.** Черновик сериализуется в `PendingOperation`
    (`ConfirmationService.propose`) с TTL (по умолчанию 30 минут), а пользователю
    уходит превью с кнопками «Применить / Изменить / Отменить»
@@ -160,7 +176,7 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 | `documents` | Метаданные документов (содержимое — только на диске, зашифровано) | `title`, `document_type`, `sensitivity`, `status` (pending/active), `storage_key` (unique), `original_filename`, `mime_type`, `size_bytes`, `sha256`, `encryption_version` |
 | `secrets` | Секреты (значение зашифровано) | `name` (unique), `secret_type`, `encrypted_value` (blob), `key_version`, `project_id`, `category_id` |
 | `entity_links` | Полиморфные связи сущностей | `from_type/from_id`, `to_type/to_id`, `relation`, уникальность пары |
-| `conversation_states` | Краткосрочный контекст сценария | PK `telegram_user_id`, `flow`, `step`, `data` (JSONB), `pending_operation_id`, `expires_at` |
+| `conversation_states` | Краткосрочный контекст сценария | PK `telegram_user_id`, `flow`, `step`, `data` (JSONB), `pending_operation_id`, `expires_at`; при `flow='agent_context'` в `data` лежат выбранная сущность агента, кандидаты и метрики последнего запроса |
 | `pending_operations` | Предложенные значимые изменения | `telegram_user_id`, `operation_type`, `payload` (JSONB), `status`, `expires_at`, `resolved_at`, `result` |
 | `audit_log` | Журнал значимых изменений (без чувствительного содержимого) | `actor`, `action`, `entity_type/id`, `result`, `meta`, `created_at` |
 | `processed_updates` | Идемпотентность Telegram-апдейтов | PK `update_id`, `created_at` |

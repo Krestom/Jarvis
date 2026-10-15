@@ -99,3 +99,11 @@ OpenCode **не подключается к production-БД**: владелец 
 - `diagnostic_context` хранит traceback с именами переменных окружения, но
   значения ключей вычищаются redaction'ом; полные тела исключений всё равно
   не предназначены для публикации.
+
+## Агентские запросы
+
+`/diagnostics` показывает строку «AI-агент (последний запрос): termination,
+профиль, шаги, инструменты, токены, мс» — метрики без содержимого диалога.
+Машинные причины остановки (`timeout`, `step_limit`, `loop_detected`,
+`cancelled`, `queue_timeout`, …) описаны в [docs/agent.md](agent.md);
+те же данные лежат в `conversation_states.data.agent_last_run`.

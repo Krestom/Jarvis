@@ -50,7 +50,7 @@ _EXPORT_USAGE = (
 
 
 async def _system_summary(
-    session: AsyncSession, settings: Settings, ai: AIProvider
+    session: AsyncSession, settings: Settings, ai: AIProvider, user_id: int
 ) -> tuple[list[str], dict, dict]:
     """Строки системной сводки + счётчики backlog (пустые при недоступной БД)."""
     lines = ["<b>Диагностика</b>"]
@@ -80,6 +80,9 @@ async def _system_summary(
             status_counts.get(status, 0) for status in OPEN_STATUSES
         )
         lines.append(f"Backlog улучшений: {total} записей (открытых: {opened})")
+        agent_line = await _agent_last_run_line(session, settings, user_id)
+        if agent_line:
+            lines.append(agent_line)
     except Exception:  # noqa: BLE001 - статус не должен падать
         lines.append("База данных: ❌")
     lines.extend(
@@ -97,7 +100,9 @@ async def _system_summary(
 async def cmd_diagnostics(
     message: Message, session: AsyncSession, settings: Settings, ai: AIProvider
 ) -> None:
-    lines, status_counts, category_counts = await _system_summary(session, settings, ai)
+    lines, status_counts, category_counts = await _system_summary(
+        session, settings, ai, message.from_user.id
+    )
     await message.answer(
         "\n".join(lines), reply_markup=diagnostics_keyboard(status_counts, category_counts)
     )
@@ -106,10 +111,38 @@ async def cmd_diagnostics(
 async def menu_diagnostics(
     callback: CallbackQuery, session: AsyncSession, settings: Settings, ai: AIProvider
 ) -> None:
-    lines, status_counts, category_counts = await _system_summary(session, settings, ai)
+    lines, status_counts, category_counts = await _system_summary(
+        session, settings, ai, callback.from_user.id
+    )
     await callback.answer()
     await callback.message.answer(
         "\n".join(lines), reply_markup=diagnostics_keyboard(status_counts, category_counts)
+    )
+
+
+async def _agent_last_run_line(
+    session: AsyncSession, settings: Settings, user_id: int
+) -> str | None:
+    """Сводка последнего агентского запроса (без содержимого диалога)."""
+    from jarvis.agent.routing import AGENT_FLOW
+    from jarvis.conversation.state import ConversationStore
+    from jarvis.repositories.conversation import ConversationRepository
+
+    state = await ConversationStore(ConversationRepository(session), settings).get_active(
+        user_id
+    )
+    if state is None or state.flow != AGENT_FLOW:
+        return None
+    run = (state.data or {}).get("agent_last_run")
+    if not isinstance(run, dict):
+        return None
+    tokens = run.get("tokens")
+    tokens_text = f", токенов {tokens}" if tokens else ""
+    return (
+        "AI-агент (последний запрос): "
+        f"{esc(str(run.get('termination', '?')))}, профиль {esc(str(run.get('profile', '?')))}, "
+        f"шагов {run.get('steps', '?')}, инструментов {run.get('tool_calls', '?')}"
+        f"{tokens_text}, {run.get('duration_ms', '?')} мс"
     )
 
 

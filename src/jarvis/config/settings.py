@@ -80,6 +80,38 @@ class Settings(BaseSettings):
     # Каталог для выгрузок improvement backlog (Markdown/JSON).
     export_dir: Path = Path("var/exports")
 
+    # --- AI-агент (Stage 3) ---
+    agent_enabled: bool = True
+    # Бюджеты времени (секунды, monotonic) по профилям запроса.
+    agent_ordinary_seconds: float = 60.0
+    agent_planning_seconds: float = 120.0
+    agent_research_seconds: float = 300.0
+    # Лимиты шагов оркестрации (LLM-вызов + вызовы инструментов) по профилям.
+    agent_ordinary_steps: int = 12
+    agent_planning_steps: int = 20
+    agent_research_steps: int = 40
+    # Абсолютный лимит LLM-вызовов на запрос и повторов одинаковых tool-вызовов.
+    agent_max_llm_calls: int = 18
+    agent_max_repeat_tool_calls: int = 2
+    agent_max_tool_retries: int = 1
+    # Ожидание очереди, если для пользователя уже выполняется запрос.
+    agent_queue_wait_seconds: float = 90.0
+    # Лимиты web-запросов по профилям.
+    agent_web_queries_ordinary: int = 1
+    agent_web_queries_planning: int = 3
+    agent_web_queries_research: int = 8
+    # Мягкий/жёсткий лимит токенов (действует, только если провайдер отдаёт usage).
+    agent_token_soft_limit: int = 25000
+    agent_token_hard_limit: int = 50000
+    # Маркеры профилей (нижний регистр, подстрока в тексте запроса).
+    agent_planning_markers: str = "спланир,план на,планируем,составь план"
+    agent_research_markers: str = "исследуй,глубокий поиск,разберись детально,research"
+
+    # --- Web-поиск (интерфейс research/) ---
+    # none | fake (реальный провайдер не подключён: нет настроенного API)
+    web_search_provider: str = "none"
+    web_search_max_results: int = 5
+
     # --- Workflow TTL ---
     conversation_state_ttl_hours: int = 24
     pending_operation_ttl_minutes: int = 30

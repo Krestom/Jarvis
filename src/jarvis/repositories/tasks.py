@@ -167,6 +167,19 @@ class TaskRepository:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def search_like(self, query: str, *, limit: int = 10) -> list[Task]:
+        """Подстрочный fallback для поиска (когда FTS не находит)."""
+        query = (query or "").strip()
+        if not query:
+            return []
+        stmt = (
+            select(Task)
+            .where(Task.deleted_at.is_(None), Task.title.ilike(f"%{query[:80]}%"))
+            .order_by(Task.created_at.desc())
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def find_candidates(self, query: str | None, *, limit: int = 5) -> list[Task]:
         """Кандидаты для привязки (комментария и т.п.): FTS, ILIKE, затем свежие."""
         query = (query or "").strip()

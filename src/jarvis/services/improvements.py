@@ -133,6 +133,49 @@ class ImprovementService:
         )
         return item
 
+    async def record_gap(
+        self,
+        *,
+        title: str,
+        summary: str,
+        evidence: str | None = None,
+        correlation_id: str | None = None,
+    ) -> ImprovementItem:
+        """Зафиксировать объективно отсутствующую возможность (не сбой и не гипотеза).
+
+        Дедуп — по открытой записи с тем же заголовком.
+        """
+        diagnostic = self._diagnostic_context(
+            correlation_id=correlation_id,
+            extra={"evidence": evidence} if evidence else None,
+        )
+        title = title.strip()[:300]
+        existing = await self._repo.find_open_by_signature(
+            source=ImprovementSource.USER_OBSERVATION, component=None, title=title
+        )
+        if existing is not None:
+            await self._repo.register_occurrence(
+                existing,
+                correlation_id=correlation_id,
+                note=summary.strip()[:500] or None,
+                diagnostic_context=diagnostic,
+            )
+            return existing
+        item = await self._repo.create(
+            category=ImprovementCategory.MISSING_CAPABILITY,
+            source=ImprovementSource.USER_OBSERVATION,
+            title=title,
+            summary=summary.strip() or title,
+            correlation_id=correlation_id,
+            app_version=__version__,
+            diagnostic_context=diagnostic,
+            meta={},
+        )
+        await self._repo.register_occurrence(
+            item, correlation_id=correlation_id, diagnostic_context=diagnostic, first=True
+        )
+        return item
+
     async def merge(
         self, target_id: uuid.UUID, source_ids: list[uuid.UUID]
     ) -> ImprovementItem:
