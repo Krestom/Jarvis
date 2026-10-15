@@ -192,12 +192,12 @@ def comments_keyboard(comments, task_id: str) -> InlineKeyboardMarkup:
         )
     )
     for index, comment in enumerate(comments, start=1):
+        # Telegram: callback_data ≤ 64 байт, поэтому id задачи и комментария
+        # вместе не помещаются — задачу восстанавливаем из строки комментария.
         builder.add(
             InlineKeyboardButton(
                 text=f"✏️ Изменить {index}",
-                callback_data=TaskCB(
-                    action="comment_edit", task_id=task_id, value=uuid_hex(comment.id)
-                ).pack(),
+                callback_data=TaskCB(action="cedit", value=uuid_hex(comment.id)).pack(),
             )
         )
     builder.row(

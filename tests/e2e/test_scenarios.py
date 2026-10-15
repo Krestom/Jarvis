@@ -328,6 +328,22 @@ async def test_scenario_task_comments_via_card(test_settings, session_factory, s
     card_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "1. Проверить бэкап")
     assert any("Позвонить в поддержку сервера" in (m.text or "") for m in card_messages)
 
+    # Редактирование комментария из списка (регрессия: callback ≤ 64 байт).
+    card_message = keyboard_messages(card_messages)[-1]
+    comments_menu = await harness.click_button(DEFAULT_USER_ID, card_message, "Комментарии")
+    menu_message = keyboard_messages(comments_menu)[-1]
+    edit_prompt = await harness.click_button(DEFAULT_USER_ID, menu_message, "Изменить 1")
+    assert any("новую версию комментария" in (m.text or "") for m in edit_prompt)
+
+    proposal = await harness.send_text(DEFAULT_USER_ID, "Позвонить и написать письмо")
+    assert any("Изменить комментарий?" in (m.text or "") for m in proposal)
+    await confirm_last(harness, DEFAULT_USER_ID, proposal)
+    await session.commit()
+    session.expire_all()  # приложение писало в другой сессии — сбрасываем кэш
+
+    comments = await TaskCommentRepository(session).list_for_task(task_id)
+    assert [comment.content for comment in comments] == ["Позвонить и написать письмо"]
+
 
 # 10. Естественный язык: «добавь к задаче …» → выбор задачи → комментарий.
 async def test_scenario_add_comment_natural_language(test_settings, session_factory, session):

@@ -99,6 +99,27 @@ async def task_action(
     action = callback_data.action
     task_id = parse_hex_uuid(callback_data.task_id)
 
+    if action == "cedit":
+        # Изменение комментария: id задачи восстанавливаем из самого комментария
+        # (в callback_data оба id не помещаются).
+        comment_id = parse_hex_uuid(callback_data.value)
+        comment = await TaskCommentRepository(session).get(comment_id) if comment_id else None
+        if comment is None:
+            await callback.answer("Комментарий не найден", show_alert=True)
+            return
+        store = ConversationStore(ConversationRepository(session), settings)
+        await store.set(
+            user_id,
+            Flow.EDIT_COMMENT,
+            data={"comment_id": str(comment.id), "task_id": str(comment.task_id)},
+        )
+        await callback.answer()
+        preview = comment.content if len(comment.content) <= 300 else comment.content[:299] + "…"
+        await callback.message.answer(
+            f"Пришлите новую версию комментария.\n\n<i>{esc(preview)}</i>"
+        )
+        return
+
     if action == "view":
         if task_id is None:
             await callback.answer("Некорректная задача", show_alert=True)
@@ -221,25 +242,6 @@ async def task_action(
         await callback.answer()
         await callback.message.answer(
             f"Напишите комментарий к «{esc(task.title)}» (текстом или голосом)."
-        )
-        return
-
-    if action == "comment_edit":
-        comment_id = parse_hex_uuid(callback_data.value)
-        comment = await TaskCommentRepository(session).get(comment_id) if comment_id else None
-        if comment is None:
-            await callback.answer("Комментарий не найден", show_alert=True)
-            return
-        store = ConversationStore(ConversationRepository(session), settings)
-        await store.set(
-            user_id,
-            Flow.EDIT_COMMENT,
-            data={"comment_id": str(comment.id), "task_id": str(task.id)},
-        )
-        await callback.answer()
-        preview = comment.content if len(comment.content) <= 300 else comment.content[:299] + "…"
-        await callback.message.answer(
-            f"Пришлите новую версию комментария.\n\n<i>{esc(preview)}</i>"
         )
         return
 

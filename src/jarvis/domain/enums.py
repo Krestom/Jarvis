@@ -109,6 +109,28 @@ class Relation(StrEnum):
     REFERS_TO = "refers_to"
 
 
+class ImprovementCategory(StrEnum):
+    FAILURE = "failure"
+    MISSING_CAPABILITY = "missing_capability"
+    UX_FRICTION = "ux_friction"
+    IMPROVEMENT_IDEA = "improvement_idea"
+
+
+class ImprovementSource(StrEnum):
+    TECHNICAL_EVENT = "technical_event"
+    USER_OBSERVATION = "user_observation"
+    LLM_HYPOTHESIS = "llm_hypothesis"
+
+
+class ImprovementStatus(StrEnum):
+    NEW = "new"
+    REVIEWED = "reviewed"
+    PLANNED = "planned"
+    IMPLEMENTED = "implemented"
+    WONT_FIX = "wont_fix"
+    ARCHIVED = "archived"
+
+
 class PendingStatus(StrEnum):
     PENDING = "pending"
     CONFIRMED = "confirmed"

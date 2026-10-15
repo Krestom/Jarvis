@@ -15,6 +15,7 @@ from sqlalchemy import (
     BigInteger,
     Computed,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -33,6 +34,9 @@ from jarvis.domain.enums import (
     DocumentStatus,
     DocumentType,
     EntityType,
+    ImprovementCategory,
+    ImprovementSource,
+    ImprovementStatus,
     KnowledgeSource,
     KnowledgeStatus,
     KnowledgeType,
@@ -391,3 +395,87 @@ class ProcessedUpdate(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+# --- Improvement backlog (Stage 2) -------------------------------------------
+
+
+class ImprovementItem(Base, TimestampMixin):
+    """Наблюдение о проблеме или возможности развития Jarvis.
+
+    Отдельная сущность: не смешивается с задачами, знаниями и диалогами.
+    Подтверждённые технические события (source=technical_event) отличаются
+    от гипотез (source=llm_hypothesis, confidence обязателен).
+    """
+
+    __tablename__ = "improvement_items"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    category: Mapped[ImprovementCategory] = mapped_column(
+        _enum(ImprovementCategory, "improvement_category"),
+        nullable=False,
+    )
+    source: Mapped[ImprovementSource] = mapped_column(
+        _enum(ImprovementSource, "improvement_source"),
+        nullable=False,
+    )
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_behavior: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actual_behavior: Mapped[str | None] = mapped_column(Text, nullable=True)
+    facts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assumptions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proposed_fix: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggested_priority: Mapped[TaskPriority | None] = mapped_column(
+        _enum(TaskPriority, "task_priority"), nullable=True
+    )
+    status: Mapped[ImprovementStatus] = mapped_column(
+        _enum(ImprovementStatus, "improvement_status"),
+        nullable=False,
+        default=ImprovementStatus.NEW,
+    )
+    occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    component: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    app_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    diagnostic_context: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    source_event_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    merged_from: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+    __table_args__ = (
+        Index("ix_improvement_items_status_category", "status", "category"),
+        Index("ix_improvement_items_last_seen", "last_seen_at"),
+        Index("ix_improvement_items_correlation", "correlation_id"),
+    )
+
+
+class ImprovementEvent(Base):
+    """Исходное событие/повтор: позволяет вернуться к отдельным случаям."""
+
+    __tablename__ = "improvement_events"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("improvement_items.id", ondelete="CASCADE"), nullable=False
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    diagnostic_context: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+
+    __table_args__ = (Index("ix_improvement_events_item", "item_id", "occurred_at"),)
