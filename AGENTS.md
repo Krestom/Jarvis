@@ -1,0 +1,55 @@
+# AGENTS.md — рабочий цикл Jarvis для агентов
+
+Jarvis — Telegram-first Knowledge OS: aiogram-бот, PostgreSQL, Alembic,
+шифрованное хранилище, read-only MCP. Этот файл описывает, как внешний
+coding-агент (OpenCode и т.п.) работает с **improvement backlog** проекта.
+
+## Контекст репозитория
+
+- Тесты: `python -m pytest` (нужен PostgreSQL из `docker compose up -d postgres`;
+  тесты сами создают БД `jarvis_test`). Юнит-тесты без БД: `python -m pytest tests/unit`.
+- Линт: `ruff check .`.
+- Миграции: `alembic revision --autogenerate -m "..."`, затем `alembic upgrade head`.
+- Секреты только в `.env` (gitignored). Не печатать значения ключей в логи и чат.
+- Не коммитить и не пушить без явной просьбы владельца.
+
+## Цикл improvement backlog
+
+1. **Получить выгрузку.** Владелец в боте: `/export_issues` (опционально
+   `status=...`/`category=...`). Бот присылает два файла: Markdown (для чтения)
+   и JSON (точные поля и свидетельства событий). Файлы также лежат в `EXPORT_DIR`
+   (по умолчанию `var/exports/`).
+2. **Разобрать.** В JSON у каждой записи: категория, источник, статус,
+   `occurrence_count`, `diagnostic_context` (redacted), `events` — отдельные
+   случаи с correlation_id. Приоритет — `technical_event` (подтверждённые сбои);
+   `llm_hypothesis` — гипотезы, требуют проверки по коду.
+3. **Проверить по коду.** Найти реальный путь воспроизведения, сформулировать
+   исправление. Не доверять формулировке гипотезы дословно.
+4. **Исправить с тестом.** Минимальный диф; регрессионный тест обязателен
+   (unit/integration/e2e — по месту). Прогнать `pytest` и `ruff`.
+5. **Отметить в боте.** `/diagnostics` → карточка записи → статус:
+   `implemented` (сделано), `wont_fix` (осознанно не делаем), `planned`
+   (запланировано на потом), `archived` (неактуально). Если непонятно —
+   `reviewed` + вопрос владельцу.
+
+## Правила
+
+- **Никогда не подключать агента к production-БД.** Единственный канал — файлы,
+  переданные владельцем вручную.
+- Выгрузки уже обезличены (redaction при записи и при экспорте), но это личные
+  данные владельца: не выкладывать их в публичные места.
+- Повтор проблемы = `occurrence_count + 1`, а не новая запись; дубликаты
+  объединяются `ImprovementService.merge` (сохраняет события и `merged_from`).
+- Записи backlog не удалять без причины: `wont_fix`/`archived` предпочтительнее
+  hard delete (доступен только владельцу из бота, с подтверждением).
+- Гипотезы LLM ниже порога `IMPROVEMENT_HYPOTHESIS_MIN_CONFIDENCE` (0.75 по
+  умолчанию) в backlog не попадают — это ожидаемое поведение, не баг.
+- Диагностика не содержит тел переписки: хранятся correlation_id, traceback
+  (redacted), счётчики и метаданные апдейта. Не добавлять в backlog тексты
+  пользователя.
+
+## Документация
+
+- Устройство backlog, `/diagnostics` и `/export_issues`: `docs/diagnostics.md`.
+- Архитектура: `docs/architecture.md`. Security-модель: `docs/security.md`.
+- План и журнал Stage 2: `docs/stage-2-audit.md`.

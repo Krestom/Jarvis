@@ -31,6 +31,10 @@
   `pending`-операцию с кнопками «Подтвердить / Изменить / Отменить», идемпотентную
   и ограниченную по времени.
 - **Диалог переживает перезапуск**: состояние сценариев в PostgreSQL.
+- **Improvement backlog**: технические сбои фиксируются автоматически, гипотезы
+  об улучшениях — из диалога (с порогом достоверности); `/diagnostics` — сводка,
+  карточки и статусы, `/export_issues` — выгрузка Markdown + JSON для ручной
+  передачи в OpenCode. Подробно: [docs/diagnostics.md](docs/diagnostics.md).
 - **MCP для OpenCode**: read-only инструменты поиска знаний, инструкций, задач и
   контекста проектов.
 
@@ -59,7 +63,7 @@ src/jarvis/
 ├─ domain/        типы, перечисления, политика временных групп
 ├─ db/            ORM-модели, сессии, миграции (alembic/)
 ├─ repositories/  доступ к данным
-├─ services/      задачи, знания, поиск, документы, секреты, подтверждения
+├─ services/      задачи, знания, поиск, документы, секреты, подтверждения, backlog
 ├─ conversation/  диалоговый движок, состояния, превью операций, разбор дат
 ├─ ai/            провайдеры LLM (OpenCode Go, fake, none), structured output
 ├─ transcription/ провайдеры распознавания речи
@@ -93,7 +97,7 @@ docker compose ps          # все сервисы healthy
 ```
 
 Миграции применяются автоматически на старте сервиса `app`. Проверка: напишите
-боту `/start`, затем `/status`.
+боту `/start`, затем `/diagnostics`.
 
 ### Локальный запуск (без Docker, с VPN/прокси)
 
@@ -169,7 +173,8 @@ TRANSCRIPTION_MODEL=whisper-large-v3
 ## Команды бота
 
 `/start` · `/help` · `/search` · `/tasks` ` /today` · `/inbox` · `/documents` ·
-`/secret` · `/settings` (категории) · `/status` (диагностика без секретов) ·
+`/secret` · `/settings` (категории) · `/diagnostics` (сводка и backlog улучшений,
+алиас `/status`) · `/export_issues` (выгрузка backlog в Markdown и JSON) ·
 `/cancel`. Естественный язык работает независимо от команд.
 
 ## MCP для OpenCode
@@ -210,6 +215,8 @@ alembic revision --autogenerate -m "..."  # новая миграция (пос�
   `scripts/backup.sh`, `scripts/verify_backup.sh`, `scripts/restore.sh`.
 - Развёртывание и обновление: [docs/deployment.md](docs/deployment.md).
 - Security-модель и остаточные риски: [docs/security.md](docs/security.md).
+- Диагностика и improvement backlog: [docs/diagnostics.md](docs/diagnostics.md)
+  (рабочий цикл разбора — в [AGENTS.md](AGENTS.md)).
 
 ## Ограничения текущей версии
 
@@ -221,7 +228,10 @@ alembic revision --autogenerate -m "..."  # новая миграция (пос�
   определение проекта из текста — на усмотрение AI-промпта.
 - Один владелец (единственный allow-list), без ролей и мультиарендности.
 - MCP: без пагинации (до 50 записей за вызов), один статический токен.
-- Массовый импорт/экспорт данных не предусмотрен.
+- Массовый импорт/экспорт данных не предусмотрен (кроме выгрузки improvement
+  backlog: `/export_issues` → MD + JSON).
+- Improvement backlog: при недоступной БД сбои не буферизуются на диск —
+  остаются только в логах.
 - Удаление документов и секретов необратимо (файлы затираются из хранилища);
   записи знаний/задачи удаляются мягко.
 
