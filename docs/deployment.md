@@ -197,6 +197,46 @@ free -h; docker stats --no-stream
 Если порты `5433`/`8765` окажутся заняты — поменяйте `POSTGRES_PORT`/`MCP_PORT`
 в `.env` Jarvis (детали — раздел 8); ufw и ssh не трогаем вовсе.
 
+### 3.3. Альтернатива: переезд без дампа (физическая копия тома)
+
+Если `pg_dump`/`pg_restore` не хочется: переносим каталог данных PostgreSQL
+как есть. Требования: **одинаковая мажорная версия** (compose фиксирует
+`postgres:17-alpine` и локально, и на сервере) и полная остановка стека на
+время копии, чтобы данные были консистентны.
+
+```sh
+# ЛОКАЛЬНО (Git Bash): остановить стек (бот/файлы/БД) и снять копии томов
+cd <репозиторий>
+docker compose stop app mcp postgres
+mkdir -p backups-physical
+MSYS_NO_PATHCONV=1 docker run --rm \
+  -v jarvis_jarvis-pgdata:/data -v "$PWD/backups-physical":/backup \
+  alpine tar -czf /backup/pgdata.tar.gz -C /data .
+MSYS_NO_PATHCONV=1 docker run --rm \
+  -v jarvis_jarvis-files:/data -v "$PWD/backups-physical":/backup \
+  alpine tar -czf /backup/files.tar.gz -C /data .
+docker compose up -d postgres          # вернуть локальную БД, если нужна
+
+scp backups-physical/pgdata.tar.gz backups-physical/files.tar.gz \
+  deploy@SERVER:/opt/jarvis/
+
+# НА СЕРВЕРЕ: создать тома и распаковать ДО первого запуска postgres
+cd /opt/jarvis
+docker volume create jarvis_jarvis-pgdata
+docker volume create jarvis_jarvis-files
+docker run --rm -v jarvis_jarvis-pgdata:/data -v "$PWD":/backup \
+  alpine sh -c 'tar -xzf /backup/pgdata.tar.gz -C /data'
+docker run --rm -v jarvis_jarvis-files:/data -v "$PWD":/backup \
+  alpine sh -c 'tar -xzf /backup/files.tar.gz -C /data'
+docker compose up -d --build
+```
+
+Важно: распаковка выполняется контейнером от root — владелец файлов
+(postgres, uid 70) сохраняется из архива, поэтому БД стартует без правок.
+Каталог данных нельзя переносить между мажорными версиями PostgreSQL:
+если есть сомнение в совместимости или хочется проверяемости — используйте
+дамп (раздел 3.1). Если документов нет, `files.tar.gz` можно пропустить.
+
 ## 4. Обновление
 
 ```sh
