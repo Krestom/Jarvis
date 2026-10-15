@@ -7,7 +7,7 @@ from aiogram.filters.callback_data import CallbackData
 
 class MenuCB(CallbackData, prefix="mn"):
     # main|search|tasks|knowledge|documents|projects|settings|secrets|cancel_flow|
-    # category_new|category_rename|project_new|secret_new
+    # category_new|category_rename|project_new|secret_new|diagnostics
     action: str
     value: str = ""
 
@@ -59,6 +59,19 @@ class SecretCB(CallbackData, prefix="sc"):
 
 
 class SecretListCB(CallbackData, prefix="sl"):
+    page: int = 0
+
+
+class ImpListCB(CallbackData, prefix="il"):
+    kind: str = "open"  # open | all | status | category
+    value: str = ""  # статус или категория, когда kind их задаёт
+    page: int = 0
+
+
+class ImpCB(CallbackData, prefix="imp"):
+    action: str  # view | status | delete | delete_yes | delete_no | export
+    item_id: str = ""
+    value: str = ""
     page: int = 0
 
 

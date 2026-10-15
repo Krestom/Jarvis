@@ -5,7 +5,6 @@ from __future__ import annotations
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
@@ -14,7 +13,6 @@ from jarvis.bot.texts import CANCELLED_TEXT, HELP_TEXT, START_TEXT
 from jarvis.config.settings import Settings
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
-from jarvis.db.models import Document, KnowledgeItem, Secret, Task
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.services.catalog import CatalogService
 from jarvis.services.confirmation import ConfirmationService
@@ -84,39 +82,6 @@ async def cmd_settings(message: Message, session: AsyncSession, settings: Settin
     await send_settings(message, session, settings)
 
 
-async def cmd_status(
-    message: Message, session: AsyncSession, settings: Settings, ai: AIProvider
-) -> None:
-    db_ok = True
-    counts: dict[str, int] = {}
-    try:
-        for model, label in (
-            (Task, "задач"),
-            (KnowledgeItem, "записей знаний"),
-            (Document, "документов"),
-            (Secret, "секретов"),
-        ):
-            result = await session.execute(
-                select(func.count()).select_from(model).where(model.deleted_at.is_(None))
-            )
-            counts[label] = int(result.scalar_one())
-    except Exception:  # noqa: BLE001 - статус не должен падать
-        db_ok = False
-
-    lines = [
-        "<b>Диагностика</b>",
-        f"База данных: {'✅' if db_ok else '❌'}",
-        f"AI-провайдер: <code>{settings.ai_provider}</code> ({ai.name})",
-        f"Транскрибация: <code>{settings.transcription_provider}</code>",
-        f"Часовой пояс: <code>{settings.app_timezone}</code>",
-        f"Шифрование хранилища: {'✅ настроено' if settings.has_document_key else '❌ нет ключа'}",
-    ]
-    if db_ok:
-        summary = ", ".join(f"{value} {label}" for label, value in counts.items())
-        lines.append(f"Сохранено: {summary}")
-    await message.answer("\n".join(lines), reply_markup=main_menu())
-
-
 def build_router() -> Router:
     router = Router(name="commands")
     router.message.register(cmd_start, CommandStart())
@@ -129,5 +94,4 @@ def build_router() -> Router:
     router.message.register(cmd_documents, Command("documents"))
     router.message.register(cmd_secret, Command("secret"))
     router.message.register(cmd_settings, Command("settings"))
-    router.message.register(cmd_status, Command("status"))
     return router

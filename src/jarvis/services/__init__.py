@@ -1,6 +1,7 @@
 from jarvis.services.catalog import CatalogService
 from jarvis.services.confirmation import ConfirmationService, ConfirmResult
 from jarvis.services.errors import NotFoundError, OperationError
+from jarvis.services.improvement_export import export_backlog
 from jarvis.services.improvements import ImprovementService
 from jarvis.services.knowledge import KnowledgeService, allowed_sensitivities
 from jarvis.services.operations import AppliedOperation, apply_operation
@@ -21,4 +22,5 @@ __all__ = [
     "TaskService",
     "allowed_sensitivities",
     "apply_operation",
+    "export_backlog",
 ]

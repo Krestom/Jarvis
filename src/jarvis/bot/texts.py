@@ -32,7 +32,8 @@ HELP_TEXT = """\
 /documents — документы
 /secret — секреты
 /settings — настройки и категории
-/status — диагностика
+/diagnostics — диагностика и backlog улучшений
+/export_issues — выгрузка backlog в Markdown и JSON
 /cancel — отменить текущий сценарий
 /help — эта справка
 """

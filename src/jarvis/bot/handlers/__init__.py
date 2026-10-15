@@ -9,6 +9,7 @@ def build_routers() -> list[Router]:
     from jarvis.bot.handlers import (
         commands,
         confirmations,
+        diagnostics,
         documents,
         free_text,
         knowledge,
@@ -21,6 +22,7 @@ def build_routers() -> list[Router]:
 
     return [
         commands.build_router(),
+        diagnostics.build_router(),
         menu.build_router(),
         confirmations.build_router(),
         tasks.build_router(),

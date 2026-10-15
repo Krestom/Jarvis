@@ -92,6 +92,7 @@ class ImprovementRepository:
         self,
         *,
         status: ImprovementStatus | None = None,
+        statuses: tuple[ImprovementStatus, ...] | None = None,
         category: ImprovementCategory | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -99,6 +100,8 @@ class ImprovementRepository:
         query = select(ImprovementItem)
         if status is not None:
             query = query.where(ImprovementItem.status == status)
+        if statuses is not None:
+            query = query.where(ImprovementItem.status.in_(statuses))
         if category is not None:
             query = query.where(ImprovementItem.category == category)
         result = await self._session.execute(
@@ -114,15 +117,26 @@ class ImprovementRepository:
         )
         return {row[0]: row[1] for row in result}
 
+    async def counts_by_category(self) -> dict[ImprovementCategory, int]:
+        result = await self._session.execute(
+            select(ImprovementItem.category, func.count()).group_by(
+                ImprovementItem.category
+            )
+        )
+        return {row[0]: row[1] for row in result}
+
     async def count_items(
         self,
         *,
         status: ImprovementStatus | None = None,
+        statuses: tuple[ImprovementStatus, ...] | None = None,
         category: ImprovementCategory | None = None,
     ) -> int:
         query = select(func.count()).select_from(ImprovementItem)
         if status is not None:
             query = query.where(ImprovementItem.status == status)
+        if statuses is not None:
+            query = query.where(ImprovementItem.status.in_(statuses))
         if category is not None:
             query = query.where(ImprovementItem.category == category)
         result = await self._session.execute(query)

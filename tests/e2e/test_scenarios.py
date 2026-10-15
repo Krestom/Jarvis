@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -18,6 +19,7 @@ from jarvis.domain.enums import (
     DocumentStatus,
     ImprovementCategory,
     ImprovementSource,
+    ImprovementStatus,
     TaskBucket,
 )
 from jarvis.repositories.documents import DocumentRepository
@@ -27,6 +29,7 @@ from jarvis.repositories.secrets import SecretRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.catalog import CatalogService
 from jarvis.services.drafts import TaskDraft
+from jarvis.services.improvements import ImprovementService
 from jarvis.services.secrets import SecretService
 from jarvis.services.tasks import TaskService
 from jarvis.transcription.fake import FakeTranscription
@@ -583,3 +586,78 @@ async def test_scenario_technical_error_recorded(test_settings, session_factory,
     assert "тестовый сбой e2e" in item.summary
     assert item.diagnostic_context["traceback"]
     assert item.correlation_id == item.diagnostic_context["correlation_id"]
+
+
+# 17. /diagnostics: сводка → список → карточка → статус → удаление с подтверждением.
+async def test_scenario_diagnostics_backlog_flow(test_settings, session_factory, session):
+    item = await ImprovementService(session, test_settings).record_failure(
+        title="ValueError: callback data too long",
+        summary="Кнопка не отправилась",
+        component="telegram_bot",
+    )
+    item_id = item.id
+    await session.commit()
+
+    harness = await make_harness(test_settings, session_factory)
+    messages = await harness.send_text(DEFAULT_USER_ID, "/diagnostics")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Backlog улучшений: 1 записей (открытых: 1)" in combined
+    summary_message = keyboard_messages(messages)[-1]
+
+    # Список открытых записей (edit_text правит то же сообщение).
+    listed = await harness.click_button(DEFAULT_USER_ID, summary_message, "Открытые")
+    assert listed == []
+    list_view = harness.current(summary_message)
+    assert "ValueError: callback data too long" in (list_view.text or "")
+
+    # Карточка записи.
+    await harness.click_button(DEFAULT_USER_ID, list_view, "1. ValueError")
+    card_view = harness.current(summary_message)
+    assert "Повторов: 1" in (card_view.text or "")
+    assert "Кнопка не отправилась" in (card_view.text or "")
+
+    # Смена статуса прямо из карточки.
+    await harness.click_button(DEFAULT_USER_ID, card_view, "Разобран")
+    await session.commit()
+    session.expire_all()
+    refreshed = await ImprovementRepository(session).get(item_id)
+    assert refreshed.status == ImprovementStatus.REVIEWED
+
+    # Удаление только после подтверждения.
+    confirm = await harness.click_button(DEFAULT_USER_ID, card_view, "Удалить")
+    assert any("безвозвратно" in (m.text or "") for m in confirm)
+    confirm_message = keyboard_messages(confirm)[-1]
+    await harness.click_button(DEFAULT_USER_ID, confirm_message, "Да, удалить")
+    await session.commit()
+    session.expire_all()
+    assert await ImprovementRepository(session).get(item_id) is None
+
+
+# 18. /export_issues: файлы MD+JSON без секретов уходят в чат.
+async def test_scenario_export_issues(test_settings, session_factory, session, tmp_path):
+    test_settings.export_dir = tmp_path / "exports"
+    await ImprovementService(session, test_settings).record_failure(
+        title="Сбой экспорта",
+        summary="Из лога утёк токен: password=hunter2secret",
+        component="telegram_bot",
+    )
+    await session.commit()
+
+    harness = await make_harness(test_settings, session_factory)
+    messages = await harness.send_text(DEFAULT_USER_ID, "/export_issues")
+    assert any("Экспорт готов" in (m.text or "") for m in messages)
+    documents = [m for m in messages if m.document is not None]
+    assert len(documents) == 2
+
+    files = sorted((tmp_path / "exports").glob("jarvis_issues_*"))
+    assert [file.suffix for file in files] == [".json", ".md"]
+    markdown = next(file for file in files if file.suffix == ".md").read_text(
+        encoding="utf-8"
+    )
+    payload = json.loads(
+        next(file for file in files if file.suffix == ".json").read_text(encoding="utf-8")
+    )
+    assert "Сбой экспорта" in markdown
+    assert "hunter2secret" not in markdown
+    assert payload["count"] == 1
+    assert "hunter2secret" not in json.dumps(payload, ensure_ascii=False)

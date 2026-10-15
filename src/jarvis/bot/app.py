@@ -32,7 +32,8 @@ BOT_COMMANDS = [
     BotCommand(command="documents", description="Документы"),
     BotCommand(command="secret", description="Секреты"),
     BotCommand(command="settings", description="Настройки"),
-    BotCommand(command="status", description="Диагностика"),
+    BotCommand(command="diagnostics", description="Диагностика и backlog"),
+    BotCommand(command="export_issues", description="Экспорт заявок (MD/JSON)"),
     BotCommand(command="help", description="Справка"),
     BotCommand(command="cancel", description="Отменить текущий сценарий"),
 ]

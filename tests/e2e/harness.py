@@ -66,15 +66,35 @@ class FakeTelegramSession(BaseSession):
             return message
         if name == "SendDocument":
             self._message_id += 1
+            document = method.document
             message = Message(
                 message_id=self._message_id,
                 date=datetime.now(UTC),
                 chat=Chat(id=int(method.chat_id), type="private"),
                 from_user=BOT_USER,
-                document=method.document,
+                document=Document(
+                    file_id=f"file-{self._message_id}",
+                    file_unique_id=f"file-{self._message_id}-u",
+                    file_name=getattr(document, "filename", None),
+                ),
             )
             self.sent_messages.append(message)
             return message
+        if name in ("EditMessageText", "EditMessageReplyMarkup"):
+            # Правим сохранённое сообщение, чтобы кнопки после edit_text
+            # оставались доступны для следующих кликов в тестах.
+            for index, existing in enumerate(self.sent_messages):
+                if existing.message_id != method.message_id:
+                    continue
+                updates: dict = {}
+                if name == "EditMessageText" and method.text is not None:
+                    updates["text"] = method.text
+                if method.reply_markup is not None:
+                    updates["reply_markup"] = method.reply_markup
+                edited = existing.model_copy(update=updates)
+                self.sent_messages[index] = edited
+                return edited
+            return True
         if name == "GetFile":
             return File(
                 file_id=method.file_id,
@@ -166,18 +186,27 @@ class BotHarness:
         return await self._feed(Update(update_id=self._next_update_id(), message=message))
 
     async def click_button(self, user_id: int, message: Message, label: str) -> list[Message]:
-        button_data = _find_button(message.reply_markup, label)
+        # Сообщение могло быть отредактировано ботом — берём актуальную версию.
+        current = self.current(message)
+        button_data = _find_button(current.reply_markup, label)
         assert button_data is not None, f"button {label!r} not found"
         callback = CallbackQuery(
             id=uuid.uuid4().hex,
             from_user=User(id=user_id, is_bot=False, first_name="Test"),
             chat_instance="1",
             data=button_data,
-            message=message,
+            message=current,
         )
         return await self._feed(
             Update(update_id=self._next_update_id(), callback_query=callback)
         )
+
+    def current(self, message: Message) -> Message:
+        """Актуальная версия отправленного сообщения (после edit_text)."""
+        for stored in reversed(self.session.sent_messages):
+            if stored.message_id == message.message_id:
+                return stored
+        return message
 
     async def _feed(self, update: Update) -> list[Message]:
         assert self.bot is not None, "call await harness.start() first"

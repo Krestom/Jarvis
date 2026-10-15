@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     # Гипотезы LLM ниже порога не попадают в backlog (не засоряем список).
     improvement_hypothesis_min_confidence: float = 0.75
     improvement_context_max_chars: int = 4000
+    # Каталог для выгрузок improvement backlog (Markdown/JSON).
+    export_dir: Path = Path("var/exports")
 
     # --- Workflow TTL ---
     conversation_state_ttl_hours: int = 24
