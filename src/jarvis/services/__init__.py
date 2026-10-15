@@ -1,4 +1,5 @@
 from jarvis.services.catalog import CatalogService
+from jarvis.services.chatlog import ChatDayExport, ChatLogService, export_chat_day
 from jarvis.services.confirmation import ConfirmationService, ConfirmResult
 from jarvis.services.errors import NotFoundError, OperationError
 from jarvis.services.improvement_export import export_backlog
@@ -11,6 +12,8 @@ from jarvis.services.tasks import TaskService
 __all__ = [
     "AppliedOperation",
     "CatalogService",
+    "ChatDayExport",
+    "ChatLogService",
     "ConfirmResult",
     "ConfirmationService",
     "ImprovementService",
@@ -23,4 +26,5 @@ __all__ = [
     "allowed_sensitivities",
     "apply_operation",
     "export_backlog",
+    "export_chat_day",
 ]

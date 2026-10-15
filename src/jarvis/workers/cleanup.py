@@ -38,6 +38,12 @@ async def run_cleanup_once(
         stats["processed_updates"] = await ProcessedUpdateRepository(session).purge_older_than(
             now - timedelta(hours=settings.processed_updates_retention_hours)
         )
+        if settings.chat_log_enabled and settings.chat_log_retention_days > 0:
+            from jarvis.repositories.chatlog import ChatLogRepository
+
+            stats["chat_messages"] = await ChatLogRepository(session).delete_older_than(
+                now - timedelta(days=settings.chat_log_retention_days)
+            )
         if settings.has_document_key:
             storage = EncryptedFileStorage(
                 settings.document_storage_path, settings.document_keyring()

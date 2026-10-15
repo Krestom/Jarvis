@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -172,8 +173,7 @@ async def test_agent_delete_requires_button_confirmation(
     assert await TaskRepository(session).get(task_id) is None
 
 
-async def test_agent_quick_actions_keyboard_from_reply(
-    test_settings, session_factory, session
+async def test_agent_quick_actions_keyboard_from_reply(    test_settings, session_factory, session
 ):
     ai = FakeProvider()
     ai.queue_plan(
@@ -197,6 +197,34 @@ async def test_agent_quick_actions_keyboard_from_reply(
     diagnostics = await harness.send_text(DEFAULT_USER_ID, "/diagnostics")
     combined = " ".join(m.text or "" for m in diagnostics)
     assert "AI-агент (последний запрос): completed" in combined
+
+
+# 20. /export_chat: журнал диалога за день уходит файлами (MD + JSON).
+async def test_scenario_chat_export(test_settings, session_factory, session, tmp_path):
+    test_settings.export_dir = tmp_path / "exports"
+    harness = await make_harness(test_settings, session_factory)
+
+    await harness.send_text(DEFAULT_USER_ID, "/start")
+
+    export_messages = await harness.send_text(DEFAULT_USER_ID, "/export_chat")
+    assert any("Чат за" in (m.text or "") for m in export_messages)
+    documents = [m for m in export_messages if m.document is not None]
+    assert len(documents) == 2
+
+    files = sorted((tmp_path / "exports").glob("jarvis_chat_*"))
+    assert [file.suffix for file in files] == [".json", ".md"]
+    markdown = next(file for file in files if file.suffix == ".md").read_text(
+        encoding="utf-8"
+    )
+    # Записаны обе стороны: команда пользователя и ответ бота.
+    assert "Пользователь (команда):" in markdown
+    assert "/start" in markdown
+    assert "Jarvis:" in markdown
+
+    json_file = next(file for file in files if file.suffix == ".json")
+    payload = json.loads(json_file.read_text(encoding="utf-8"))
+    assert payload["count"] >= 2
+    assert {message["direction"] for message in payload["messages"]} == {"in", "out"}
 
 
 class _BlockingPlanner(FakeProvider):

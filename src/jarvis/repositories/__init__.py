@@ -2,6 +2,7 @@
 
 from jarvis.repositories.audit import AuditRepository
 from jarvis.repositories.categories import DEFAULT_CATEGORIES, CategoryRepository
+from jarvis.repositories.chatlog import ChatLogRepository
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
@@ -17,6 +18,7 @@ from jarvis.repositories.tasks import TaskRepository
 __all__ = [
     "AuditRepository",
     "CategoryRepository",
+    "ChatLogRepository",
     "ConversationRepository",
     "DEFAULT_CATEGORIES",
     "DocumentRepository",

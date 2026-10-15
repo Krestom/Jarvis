@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from jarvis import __version__
 from jarvis.ai import NoneProvider, create_ai_provider
 from jarvis.bot.app import create_bot, create_dispatcher, setup_bot_commands
+from jarvis.bot.chatlog import RecordingAiohttpSession, build_out_recorder
 from jarvis.config.settings import Settings, get_settings
 from jarvis.db.session import create_engine, create_session_factory, session_scope
 from jarvis.health import create_health_app
@@ -111,6 +112,8 @@ async def amain() -> int:
     polling_task = None
     if settings.bot_token and settings.telegram_allowed_user_ids:
         bot = create_bot(settings)
+        if isinstance(bot.session, RecordingAiohttpSession):
+            bot.session.recorder = build_out_recorder(session_factory, settings)
         dispatcher = create_dispatcher(settings, session_factory, ai, transcription)
         await setup_bot_commands(bot)
         polling_task = asyncio.create_task(

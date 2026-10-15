@@ -87,6 +87,8 @@ OpenCode **не подключается к production-БД**: владелец 
 | `IMPROVEMENT_HYPOTHESIS_MIN_CONFIDENCE` | `0.75` | порог достоверности гипотез LLM |
 | `IMPROVEMENT_CONTEXT_MAX_CHARS` | `4000` | лимит traceback/контекста в записи |
 | `EXPORT_DIR` | `var/exports` | каталог выгрузок |
+| `CHAT_LOG_ENABLED` | `true` | вести журнал чата (текст с маскировкой) |
+| `CHAT_LOG_RETENTION_DAYS` | `30` | сколько дней хранить журнал |
 
 ## Ограничения
 
@@ -107,3 +109,19 @@ OpenCode **не подключается к production-БД**: владелец 
 Машинные причины остановки (`timeout`, `step_limit`, `loop_detected`,
 `cancelled`, `queue_timeout`, …) описаны в [docs/agent.md](agent.md);
 те же данные лежат в `conversation_states.data.agent_last_run`.
+
+## Экспорт чата за день
+
+`/export_chat [YYYY-MM-DD]` (по умолчанию — сегодня) выгружает журнал диалога
+за локальный день в два файла — как backlog-экспорт:
+
+- `jarvis_chat_<YYYYMMDD>.md` — читаемая хронология (`Пользователь`, `Jarvis`,
+  пометки «(голос)»/«(команда)»);
+- `jarvis_chat_<YYYYMMDD>.json` — машинный вариант (время, направление, источник).
+
+Журнал (`chat_messages`) пишется по двум хокам: middleware для входящих
+текста/команд, обёртка отправки Telegram — для исходящих сообщений; распознанный
+голос добавляет хендлер транскрибации. **Текст сохраняется уже с маскировкой
+секретов** (`security/redaction.py`), лимит записи — 4000 символов, экспорта —
+2000 сообщений на день. Хранение чистится по `CHAT_LOG_RETENTION_DAYS` (30 дней),
+журнал отключается `CHAT_LOG_ENABLED=false`.

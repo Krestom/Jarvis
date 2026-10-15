@@ -13,7 +13,8 @@ from sqlalchemy import func, select
 from jarvis.ai.fake import FakeProvider
 from jarvis.ai.schemas import Interpretation
 from jarvis.bot.app import create_dispatcher
-from jarvis.db.models import KnowledgeItem, Task
+from jarvis.bot.chatlog import build_out_recorder
+from jarvis.db.models import ChatMessage, KnowledgeItem, Task
 from jarvis.documents.storage import EncryptedFileStorage
 from jarvis.domain.enums import (
     DocumentStatus,
@@ -50,7 +51,9 @@ async def make_harness(
         ai or FakeProvider(),
         transcription,
     )
-    harness = BotHarness(dispatcher, FakeTelegramSession())
+    session = FakeTelegramSession()
+    session.recorder = build_out_recorder(session_factory, test_settings)
+    harness = BotHarness(dispatcher, session)
     await harness.start()
     return harness
 
@@ -132,6 +135,13 @@ async def test_scenario_voice_task(test_settings, session_factory, session):
     messages = await harness.send_voice(DEFAULT_USER_ID)
     assert any("Распознано" in (m.text or "") for m in messages)
     assert transcription.calls == ["voice.ogg"]
+
+    # Распознанный текст попадает в журнал чата (источник voice).
+    voice_rows = (
+        await session.execute(select(ChatMessage).where(ChatMessage.source == "voice"))
+    ).scalars().all()
+    assert len(voice_rows) == 1
+    assert voice_rows[0].text.startswith("Поставь задачу")
 
     await confirm_last(harness, DEFAULT_USER_ID, messages)
     await session.commit()

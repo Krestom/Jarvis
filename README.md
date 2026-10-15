@@ -41,6 +41,10 @@
   кнопки; удаление — только через подтверждение. Работа ограничена бюджетами
   (время, шаги, токены), повторные вызовы и циклы отсекаются, `/cancel`
   останавливает запрос. Подробно: [docs/agent.md](docs/agent.md).
+- **Журнал чата за день**: диалог (текст, голос, команды, ответы бота)
+  сохраняется с маскировкой секретов и выгружается командой `/export_chat`
+  в Markdown + JSON — как backlog. Хранение ограничено
+  `CHAT_LOG_RETENTION_DAYS`, отключается `CHAT_LOG_ENABLED=false`.
 - **MCP для OpenCode**: read-only инструменты поиска знаний, инструкций, задач и
   контекста проектов.
 
@@ -183,6 +187,7 @@ TRANSCRIPTION_MODEL=whisper-large-v3
 `/start` · `/help` · `/search` · `/tasks` ` /today` · `/inbox` · `/documents` ·
 `/secret` · `/settings` (категории) · `/diagnostics` (сводка и backlog улучшений,
 алиас `/status`) · `/export_issues` (выгрузка backlog в Markdown и JSON) ·
+`/export_chat [YYYY-MM-DD]` (выгрузка диалога за день: Markdown + JSON) ·
 `/cancel` (отменить сценарий или остановить агента). Естественный язык работает
 независимо от команд; явное обращение «Jarvis/Джарвис, ...» идёт в AI-агент.
 

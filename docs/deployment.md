@@ -172,6 +172,29 @@ docker compose up -d --build
   в отдельное тестовое окружение `jarvis-restore-test`, не трогая основной
   проект (подробности и проверки — `docs/backup-restore.md`).
 
+### 3.2. Соседние проекты на том же сервере (важно)
+
+На сервере уже работает SuperSport (отдельный compose-проект). Jarvis к нему
+отношения не имеет: своя папка (`/opt/jarvis`), своя сеть, свои тома, наружу
+ничего не публикует (порты `5433`/`8765` — только loopback). Безопасные
+контрольные точки до и после установки:
+
+```sh
+# ДО: зафиксировать состояние соседа
+cd /opt/supersport && docker compose ps
+
+# ПОСЛЕ установки Jarvis: убедиться, что SuperSport не затронут
+docker ps --format '{{.Names}}\t{{.Status}}' | grep -i supersport
+cd /opt/supersport && docker compose ps && docker compose logs --tail=20 bot
+
+# Ресурсы: у Jarvis лимиты 512M (app) + 512M (postgres) + 256M (mcp);
+# сервер 3.7 ГБ RAM + swap 2 ГБ — запас есть, но следите за `free -h`/`docker stats`.
+free -h; docker stats --no-stream
+```
+
+Если порты `5433`/`8765` окажутся заняты — поменяйте `POSTGRES_PORT`/`MCP_PORT`
+в `.env` Jarvis (детали — раздел 8); ufw и ssh не трогаем вовсе.
+
 ## 4. Обновление
 
 ```sh

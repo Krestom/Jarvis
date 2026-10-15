@@ -36,6 +36,7 @@ HELP_TEXT = """\
 /settings — настройки и категории
 /diagnostics — диагностика и backlog улучшений
 /export_issues — выгрузка backlog в Markdown и JSON
+/export_chat — выгрузка диалога за день в Markdown и JSON
 /cancel — отменить текущий сценарий или остановить агента
 /help — эта справка
 """

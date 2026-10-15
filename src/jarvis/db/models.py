@@ -479,3 +479,31 @@ class ImprovementEvent(Base):
     )
 
     __table_args__ = (Index("ix_improvement_events_item", "item_id", "occurred_at"),)
+
+
+# --- Журнал чата (экспорт диалога) -------------------------------------------
+
+
+class ChatMessage(Base):
+    """Сообщение диалога (входящее/исходящее) для дневного экспорта.
+
+    Текст сохраняется уже redacted (секреты вырезаны при записи); журнал
+    выключается CHAT_LOG_ENABLED=false и чистится по retention.
+    """
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    direction: Mapped[str] = mapped_column(String(8), nullable=False)  # in | out
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="text")
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_chat_messages_user_time", "telegram_user_id", "created_at"),
+        Index("ix_chat_messages_created", "created_at"),
+    )

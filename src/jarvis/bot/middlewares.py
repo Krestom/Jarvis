@@ -104,13 +104,16 @@ class DBSessionMiddleware(BaseMiddleware):
 
 
 def register_middlewares(dispatcher, session_factory, authorizer) -> None:
-    """Порядок: корреляция → дедупликация → авторизация → сессия → хендлеры."""
+    """Порядок: корреляция → дедупликация → авторизация → сессия → журнал → хендлеры."""
     dispatcher.update.outer_middleware(CorrelationMiddleware())
     dispatcher.update.outer_middleware(UpdateDedupMiddleware(session_factory))
     dispatcher.message.outer_middleware(AccessMiddleware(authorizer))
     dispatcher.callback_query.outer_middleware(AccessMiddleware(authorizer))
     dispatcher.message.middleware(DBSessionMiddleware(session_factory))
     dispatcher.callback_query.middleware(DBSessionMiddleware(session_factory))
+    from jarvis.bot.chatlog import ChatLogMiddleware
+
+    dispatcher.message.middleware(ChatLogMiddleware())
 
 
 message_types = (Message, CallbackQuery)

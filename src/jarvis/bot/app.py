@@ -7,13 +7,13 @@ import traceback
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, ErrorEvent
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis.agent.queue import UserSessionGate
 from jarvis.ai import AIProvider
+from jarvis.bot.chatlog import RecordingAiohttpSession
 from jarvis.bot.handlers import build_routers
 from jarvis.bot.middlewares import register_middlewares
 from jarvis.config.settings import Settings
@@ -36,13 +36,14 @@ BOT_COMMANDS = [
     BotCommand(command="settings", description="Настройки"),
     BotCommand(command="diagnostics", description="Диагностика и backlog"),
     BotCommand(command="export_issues", description="Экспорт заявок (MD/JSON)"),
+    BotCommand(command="export_chat", description="Экспорт чата за день (MD/JSON)"),
     BotCommand(command="help", description="Справка"),
     BotCommand(command="cancel", description="Отменить текущий сценарий"),
 ]
 
 
 def create_bot(settings: Settings) -> Bot:
-    session = AiohttpSession(proxy=settings.bot_proxy or None)
+    session = RecordingAiohttpSession(proxy=settings.bot_proxy or None)
     return Bot(
         token=settings.bot_token,
         session=session,

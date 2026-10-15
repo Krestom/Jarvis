@@ -108,6 +108,16 @@ async def _transcribe_and_handle(
         return
 
     await message.answer(f"🎤 <i>Распознано:</i>\n{transcript}")
+    from jarvis.logging_setup import get_correlation_id
+    from jarvis.services.chatlog import ChatLogService
+
+    await ChatLogService(session, settings).record(
+        message.from_user.id,
+        direction="in",
+        text=transcript,
+        source="voice",
+        correlation_id=get_correlation_id(),
+    )
     engine = ConversationEngine(session, settings, ai)
     outcome = await engine.handle_text(
         message.from_user.id, transcript, source=KnowledgeSource.VOICE

@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     # Каталог для выгрузок improvement backlog (Markdown/JSON).
     export_dir: Path = Path("var/exports")
 
+    # --- Журнал чата (дневной экспорт диалога) ---
+    # Тексты сохраняются уже redacted; журнал можно выключить и он чистится.
+    chat_log_enabled: bool = True
+    chat_log_retention_days: int = 30
+
     # --- AI-агент (Stage 3) ---
     agent_enabled: bool = True
     # Бюджеты времени (секунды, monotonic) по профилям запроса.
