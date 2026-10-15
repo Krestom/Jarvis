@@ -227,6 +227,20 @@ async def test_scenario_chat_export(test_settings, session_factory, session, tmp
     assert {message["direction"] for message in payload["messages"]} == {"in", "out"}
 
 
+async def test_export_chat_reports_unwritable_directory(
+    test_settings, session_factory, session, tmp_path
+):
+    """Если каталог выгрузок недоступен — бот честно отвечает, а не молчит."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("это файл, а не каталог", encoding="utf-8")
+    test_settings.export_dir = blocker / "exports"  # mkdir упадёт: родитель — файл
+    harness = await make_harness(test_settings, session_factory)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "/export_chat")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Не удалось сохранить файлы экспорта" in combined
+
+
 class _BlockingPlanner(FakeProvider):
     """Планировщик, зависающий до разрешения — для проверки /cancel."""
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
+from pathlib import Path
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -376,13 +377,17 @@ async def send_issue_export(
     repo = ImprovementRepository(session)
     result = await export_backlog(repo, statuses=statuses, category=category, tz=settings.tz)
 
-    directory = settings.export_dir
-    directory.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(settings.tz).strftime("%Y%m%d_%H%M%S")
-    md_path = directory / f"jarvis_issues_{stamp}.md"
-    json_path = directory / f"jarvis_issues_{stamp}.json"
-    md_path.write_text(result.markdown, encoding="utf-8")
-    json_path.write_text(result.json_text, encoding="utf-8")
+    paths = _write_export_files(
+        settings, f"jarvis_issues_{datetime.now(settings.tz).strftime('%Y%m%d_%H%M%S')}",
+        result.markdown, result.json_text,
+    )
+    if paths is None:
+        await target.answer(
+            "❌ Не удалось сохранить файлы экспорта (нет доступа к каталогу). "
+            "Подробности — в логах контейнера."
+        )
+        return
+    md_path, json_path = paths
 
     await target.answer(
         f"📤 Экспорт готов: {result.item_count} записей. Файлы обезличены — их можно "
@@ -390,6 +395,23 @@ async def send_issue_export(
     )
     await target.answer_document(FSInputFile(md_path))
     await target.answer_document(FSInputFile(json_path))
+
+
+def _write_export_files(
+    settings: Settings, base_name: str, markdown: str, json_text: str
+) -> tuple[Path, Path] | None:
+    """Записать пару файлов выгрузки; при ошибке — вернуть None (сообщение в лог)."""
+    directory = settings.export_dir
+    md_path = directory / f"{base_name}.md"
+    json_path = directory / f"{base_name}.json"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(markdown, encoding="utf-8")
+        json_path.write_text(json_text, encoding="utf-8")
+    except OSError:
+        log.exception("failed to write export files to %s", directory)
+        return None
+    return md_path, json_path
 
 
 async def cmd_export_issues(
@@ -424,13 +446,19 @@ async def cmd_export_chat(
             return
 
     result = await export_chat_day(session, settings, day)
-    directory = settings.export_dir
-    directory.mkdir(parents=True, exist_ok=True)
-    stamp = day.strftime("%Y%m%d")
-    md_path = directory / f"jarvis_chat_{stamp}.md"
-    json_path = directory / f"jarvis_chat_{stamp}.json"
-    md_path.write_text(result.markdown, encoding="utf-8")
-    json_path.write_text(result.json_text, encoding="utf-8")
+    paths = _write_export_files(
+        settings,
+        f"jarvis_chat_{day.strftime('%Y%m%d')}",
+        result.markdown,
+        result.json_text,
+    )
+    if paths is None:
+        await message.answer(
+            "❌ Не удалось сохранить файлы экспорта (нет доступа к каталогу). "
+            "Подробности — в логах контейнера."
+        )
+        return
+    md_path, json_path = paths
 
     truncation = " (показаны первые 2000)" if result.truncated else ""
     await message.answer(
