@@ -15,6 +15,47 @@ Compose-проект назван `jarvis` (`compose.yaml`, `name: jarvis`): с�
 на одном хосте нет; общий у проектов только хост-порт, если его занять — см.
 раздел 8.
 
+### 1.1. Профиль сервера: команды для сбора информации
+
+Выполнить на сервере одним блоком и прислать вывод (ничего не меняет, только
+читает). Нужен, чтобы знать окружение переезда: ОС, ресурсы, docker, занятые
+порты, наличие старых контейнеров Jarvis.
+
+```sh
+echo "== OS =="; cat /etc/os-release | head -3
+echo "== uname =="; uname -a
+echo "== resources =="; nproc; free -h; df -h /
+echo "== timezone =="; timedatectl 2>/dev/null | head -3
+echo "== docker =="; docker --version; docker compose version
+echo "== ports =="; ss -ltnp 2>/dev/null | grep -E ':(5433|8765|8080)\b' || echo "порты Jarvis свободны"
+echo "== docker projects =="; docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+echo "== docker volumes =="; docker volume ls | grep -i jarvis || echo "tomов jarvis нет"
+echo "== /opt =="; ls -la /opt 2>/dev/null
+echo "== firewall =="; sudo ufw status 2>/dev/null | head -5
+```
+
+### 1.2. Первичная подготовка (если сервер чистый)
+
+```sh
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y fail2ban unattended-upgrades
+sudo ufw allow 22/tcp && sudo ufw enable
+
+# Swap 2 ГБ — страховка при сборке образа и пиках памяти
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# Docker + compose plugin
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker "$USER"   # затем перелогиниться
+```
+
+Если на сервере уже работает другой проект (например, SuperSport) — ничего
+в общем не трогаем: у Jarvis свой compose-проект, своя сеть и свои тома;
+конфликт возможен только по хост-портам `5433`/`8765` (проверка выше) — тогда
+поменяйте `POSTGRES_PORT`/`MCP_PORT` в `.env`.
+
 ## 2. Подготовка
 
 1. Клонировать репозиторий и перейти в него:
@@ -91,8 +132,45 @@ docker compose ps            # postgres (healthy), app (healthy), ...
 docker compose logs -f app   # старт, миграции, "jarvis is running"
 ```
 
-и команда `/status` в боте — она покажет доступность БД, выбранные провайдеры,
-таймзону и наличие ключа шифрования.
+и команда `/diagnostics` в боте — она покажет доступность БД, выбранные
+провайдеры, таймзону, наличие ключа шифрования и последний агентский запрос.
+
+### 3.1. Переезд данных с локальной машины (первый деплой с контентом)
+
+Код на сервер попадает через `git clone` (зеркало разработки). Данные
+переносятся отдельно — это дамп БД и том файлов:
+
+```sh
+# ЛОКАЛЬНО (Windows, из корня репозитория): согласованный бэкап
+bash scripts/backup.sh
+# появится backups/jarvis-backup-<штамп>/{pg.dump, files.tar.gz, env.sanitized, ...}
+
+# скопировать копию на сервер
+scp -r backups/jarvis-backup-<штамп> user@SERVER:/opt/jarvis/backups-in/
+
+# НА СЕРВЕРЕ (из /opt/jarvis), пока app ещё не запускался и БД пустая:
+docker compose up -d postgres
+# 1) восстановить дамп БД (custom-формат pg_dump)
+docker compose exec -T postgres pg_restore \
+  -U jarvis -d jarvis --no-owner < backups-in/jarvis-backup-<штамп>/pg.dump
+# 2) восстановить том файлов (имя тома compose-проекта: jarvis_jarvis-files)
+docker run --rm \
+  -v jarvis_jarvis-files:/data \
+  -v "$PWD/backups-in/jarvis-backup-<штамп>":/backup:ro \
+  alpine sh -c 'tar -xzf /backup/files.tar.gz -C /data'
+# 3) запустить всё остальное
+docker compose up -d --build
+```
+
+Важно:
+- `.env` на сервере заполняется вручную (шаг 2), `env.sanitized` из бэкапа —
+  только для сверки имён переменных; секретов в нём нет.
+- `DOCUMENT_ENCRYPTION_KEY`/`SECRETS_ENCRYPTION_KEY` на сервере должны быть
+  **те же**, что на локальной машине, иначе файлы и секреты не расшифруются.
+- Проверить восстановление заранее можно локально через
+  `scripts/restore.sh backups/jarvis-backup-<штамп>` — он разворачивает копию
+  в отдельное тестовое окружение `jarvis-restore-test`, не трогая основной
+  проект (подробности и проверки — `docs/backup-restore.md`).
 
 ## 4. Обновление
 
@@ -125,8 +203,9 @@ docker compose up -d --build
   docker compose logs -f --tail=200 app
   ```
 
-- `/status` в боте: БД, AI-провайдер, транскрибация, таймзона, ключ шифрования,
-  количество сохранённых сущностей.
+- `/diagnostics` в боте: БД, AI-провайдер, транскрибация, таймзона, ключ
+  шифрования, количество сохранённых сущностей, backlog и последний агентский
+  запрос.
 - Health-эндпоинт (внутри контейнера; снаружи не публикуется):
 
   ```sh
@@ -220,3 +299,24 @@ MCP-сервис слушает `127.0.0.1:8765` на сервере (в compose
 | Миграции не прошли | Смотрите `docker compose logs app`: ошибка подключения (БД ещё не готова — перезапустите `docker compose up -d`) или SQL. Примените вручную: `docker compose exec app alembic upgrade head`; не выставляйте `SKIP_MIGRATIONS=1` сервису `app` |
 | «Файл повреждён или недоступен», «Не удалось расшифровать секрет» | Зашифровано другим ключом: потерян/подменён `DOCUMENT_ENCRYPTION_KEY` либо в `DOCUMENT_ENCRYPTION_OLD_KEYS` нет версии ключа этого блоба. Ключ из файлов не восстанавливается — нужен правильный `.env` или бэкап с ключом |
 | Контейнер `mcp` перезапускается | Не задан `MCP_AUTH_TOKEN` (сервис не стартует без него) или занят `MCP_PORT`: проверьте `docker compose logs mcp` |
+
+## 9. Чек-лист перед продом
+
+- [ ] `APP_ENV=prod`, `.env` с правами `600`, `POSTGRES_PASSWORD` — сильный (20+ символов)
+- [ ] `TELEGRAM_BOT_TOKEN` и `TELEGRAM_ALLOWED_USER_IDS` заполнены (в prod без них приложение откажется стартовать)
+- [ ] `BOT_PROXY` **пусто** (VPN нужен только из РФ; на Hetzner не нужен)
+- [ ] Ключи `DOCUMENT_ENCRYPTION_KEY`/`SECRETS_ENCRYPTION_KEY`: при переезде — те же, что локально; копия ключей хранится отдельно от бэкапов
+- [ ] `AI_PROVIDER=opencode_go` + ключ; `TRANSCRIPTION_PROVIDER=openai_compatible` + ключ Groq и `whisper-large-v3-turbo` (если нужен голос)
+- [ ] `MCP_AUTH_TOKEN` задан, ssh-туннель `-L 8765:127.0.0.1:8765` проверен (`opencode mcp list` → connected)
+- [ ] `docker compose ps` — все `healthy`; `docker compose logs app` — «jarvis is running», без трейсбеков
+- [ ] Ошибки бота видны в `/diagnostics` (backlog) и в логах; correlation id присутствует
+- [ ] Бэкап поставлен в cron + копия увозится вне сервера + выполнено тестовое восстановление
+- [ ] Проверена переживаемость перезагрузки: `sudo reboot`, после — `docker compose ps`
+- [ ] Смоук-тест в боте: `/start`, голосовое («Джарвис, поставь задачу…»), «Джарвис, покажи бэклог», `/diagnostics`
+
+## 10. Шпаргалка (Makefile)
+
+Из каталога проекта: `make up`, `make down`, `make logs`, `make ps`,
+`make migrate`, `make revision m="..."`, `make test`, `make lint`,
+`make backup`. Команды — тонкие обёртки над docker compose/alembic/pytest,
+вся логика остаётся в стандартных инструментах.

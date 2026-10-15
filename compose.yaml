@@ -2,11 +2,30 @@
 # собственный префикс имён сервисов. Не конфликтует с другими приложениями.
 name: jarvis
 
+# Ротация docker-логов: длительно живущий бот не должен забивать диск.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:17-alpine
     container_name: jarvis-postgres
     restart: unless-stopped
+    logging: *default-logging
+    # Консервативный тюнинг под небольшой VPS (2-4 ГБ RAM).
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=50
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-jarvis}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -21,6 +40,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     networks:
       - jarvis-net
 
@@ -29,6 +52,7 @@ services:
     image: jarvis-app:local
     container_name: jarvis-app
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jarvis}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-jarvis}
@@ -63,6 +87,7 @@ services:
     image: jarvis-app:local
     container_name: jarvis-mcp
     restart: unless-stopped
+    logging: *default-logging
     command: ["python", "-m", "jarvis.mcp"]
     env_file: .env
     environment:
