@@ -53,6 +53,13 @@ TASK_LIST_LIMIT = 20
 _TASK_INTENTS = ("create_task",)
 _KNOWLEDGE_INTENTS = ("create_knowledge",)
 
+
+def _ui_actions(interpretation: Interpretation) -> list[str]:
+    """Действия типизированного UI-запроса (пусто, если его нет)."""
+    if interpretation.ui_request is None:
+        return []
+    return list(interpretation.ui_request.actions)
+
 TASK_VIEW_LABELS = {
     "today": "Задачи на сегодня",
     "week": "Задачи на этой неделе",
@@ -75,6 +82,7 @@ class EngineOutcome:
     awaiting_document: bool = False
     awaiting_secret: bool = False
     force_save: bool = False
+    ui_actions: list[str] = field(default_factory=list)
     task_choices: list = field(default_factory=list)
     task_choices_action: str = "comment_choose"
 
@@ -246,7 +254,9 @@ class ConversationEngine:
                     reply = await self._ai.chat_reply(text, context)
                 except AIError:
                     reply = "Привет! Готов помочь с задачами, заметками и поиском."
-            return EngineOutcome(reply, menu=self._menu_flag())
+            return EngineOutcome(
+                reply, menu=self._menu_flag(), ui_actions=_ui_actions(interpretation)
+            )
 
         if intent in _TASK_INTENTS:
             return await self._propose_task(telegram_user_id, text, interpretation, context)
@@ -285,7 +295,9 @@ class ConversationEngine:
             "Не понял сообщение. Уточните, пожалуйста: сохранить как заметку, "
             "поставить задачу или найти что-то в базе?"
         )
-        return EngineOutcome(fallback, menu=self._menu_flag())
+        return EngineOutcome(
+            fallback, menu=self._menu_flag(), ui_actions=_ui_actions(interpretation)
+        )
 
     # --- Предложение операций ---
 

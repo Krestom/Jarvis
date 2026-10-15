@@ -6,6 +6,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+UIAction = Literal[
+    "search",
+    "tasks_today",
+    "tasks_week",
+    "tasks_inbox",
+    "documents",
+    "projects",
+    "settings",
+    "diagnostics",
+]
+
 Intent = Literal[
     "create_task",
     "add_comment",
@@ -31,6 +42,17 @@ class ImprovementHypothesis(BaseModel):
     evidence: str | None = None
 
 
+class UIRequest(BaseModel):
+    """Декларативный запрос UI: LLM называет намерение, backend строит клавиатуру.
+
+    Каталог компонентов и действий — allow-list; всё, что вне его, отклоняется
+    валидацией. Callback'и формирует сервер, модель их не придумывает.
+    """
+
+    component: Literal["quick_actions"]
+    actions: list[UIAction] = Field(min_length=1, max_length=8)
+
+
 class Interpretation(BaseModel):
     """Результат разбора пользовательского сообщения.
 
@@ -46,3 +68,4 @@ class Interpretation(BaseModel):
     sensitivity_hints: list[str] = Field(default_factory=list)
     reply: str | None = None
     improvement_hypothesis: ImprovementHypothesis | None = None
+    ui_request: UIRequest | None = None

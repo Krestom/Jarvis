@@ -47,6 +47,39 @@ def main_menu() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+# Каталог быстрых действий: allow-list «действие → кнопка». Модель может лишь
+# выбрать действия из списка; callback'и всегда строит сервер.
+UI_ACTION_BUTTONS: dict[str, tuple[str, str]] = {
+    "search": ("🔎 Поиск", MenuCB(action="search").pack()),
+    "tasks_today": ("🔸 Задачи на сегодня", TaskListCB(view="today").pack()),
+    "tasks_week": ("📆 Задачи на неделе", TaskListCB(view="week").pack()),
+    "tasks_inbox": ("🌀 Inbox", TaskListCB(view="inbox").pack()),
+    "documents": ("📄 Документы", MenuCB(action="documents").pack()),
+    "projects": ("🗂 Проекты", MenuCB(action="projects").pack()),
+    "settings": ("⚙️ Настройки", MenuCB(action="settings").pack()),
+    "diagnostics": ("🩺 Диагностика", MenuCB(action="diagnostics").pack()),
+}
+
+
+def quick_actions_keyboard(actions) -> InlineKeyboardMarkup | None:
+    """Клавиатура из allow-list действий; неизвестные молча отбрасываются."""
+    buttons = []
+    for action in dict.fromkeys(actions):
+        button = UI_ACTION_BUTTONS.get(action)
+        if button is not None and button not in buttons:
+            buttons.append(button)
+    if not buttons:
+        return None
+    builder = InlineKeyboardBuilder()
+    for label, callback_data in buttons:
+        builder.add(InlineKeyboardButton(text=label, callback_data=callback_data))
+    builder.row(
+        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
+    )
+    builder.adjust(2)
+    return builder.as_markup()
+
+
 def confirm_keyboard(operation_id: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.add(

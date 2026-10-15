@@ -34,10 +34,11 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
                                      │
                                      ▼
 ┌──────────────────────────── bot/ ─────────────────────────────┐
-│  app.py (Bot/Dispatcher, реестр команд)                       │
+│  app.py (Bot/Dispatcher, реестр команд, dp.errors → backlog)      │
 │  middlewares.py: correlation id → dedup → allow-list → session│
-│  handlers/: commands, menu, confirmations, tasks, knowledge,  │
-│             documents, secrets, search, voice, free_text      │
+│  handlers/: commands, diagnostics, menu, confirmations, tasks,│
+│             knowledge, documents, secrets, search, voice,     │
+│             free_text                                          │
 │  render.py / keyboards.py / formatting.py / texts.py          │
 └───────────────┬───────────────────────────────────────────────┘
                 ▼
@@ -57,6 +58,7 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 │  operations.py (apply подтверждённого)        │
 │  tasks.py, knowledge.py, documents.py,        │
 │  secrets.py, search.py, catalog.py, drafts.py │
+│  improvements.py, improvement_export.py       │
 └───────┬───────────────┬───────────────┬───────┘
         ▼               ▼               ▼
 ┌ repositories/ ┐ ┌ documents/ ┐ ┌ security/ ─────┐
@@ -72,13 +74,14 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 
 Отдельный процесс (docker service mcp):
 ┌── mcp/ ───────────────────────────────┐
-│  будет дополнено (модуль в разработке)│
+│  app.py (streamable HTTP), auth.py    │
+│  (bearer), tools.py (read-only)       │
 └───────────────────────────────────────┘
 ```
 
 Правила слоёв:
 
-- `bot/` не работает с ORM напрямую, кроме простых счётчиков в `/status`;
+- `bot/` не работает с ORM напрямую, кроме простых счётчиков в `/diagnostics`;
   бизнес-логика живёт в `services/`, доступ к данным — в `repositories/`.
 - `conversation/` — это маршрутизация и черновики, а не доступ к БД: всё
   персистентное состояние идёт через репозитории.
@@ -113,6 +116,10 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
    - иначе текст уходит в `AIProvider.interpret` с минимальным контекстом
      (время, таймзона, имена категорий/проектов);
    - по `intent` формируется черновик (`services/drafts.py`) или уточняющий вопрос.
+   Для ответов-подсказок (smalltalk/unknown) модель может вернуть типизированный
+   `ui_request` (`quick_actions`): backend собирает кнопки строго из allow-list
+   `UI_ACTION_BUTTONS` (`bot/keyboards.py`), callback'и формирует сервер —
+   модель кнопок не рисует.
 5. **Pending-операция.** Черновик сериализуется в `PendingOperation`
    (`ConfirmationService.propose`) с TTL (по умолчанию 30 минут), а пользователю
    уходит превью с кнопками «Применить / Изменить / Отменить»
@@ -127,6 +134,12 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
    сохраняется в `pending_operations.result`.
 8. **Commit.** `session_scope` коммитит транзакцию; при неожиданной ошибке —
    rollback, операция остаётся `pending` и может быть повторена безопасно.
+
+Неожиданные исключения в обработке апдейта перехватывает `dp.errors`
+(`bot/app.py`) и записывает в improvement backlog
+(`ImprovementService.record_failure`): тип ошибки, traceback (redacted,
+обрезан), correlation id, тип апдейта — без тел сообщений. Подробнее:
+[docs/diagnostics.md](diagnostics.md).
 
 Каждый пользователь имеет одно активное состояние диалога
 (`conversation_states.telegram_user_id` — первичный ключ).
@@ -151,6 +164,8 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 | `pending_operations` | Предложенные значимые изменения | `telegram_user_id`, `operation_type`, `payload` (JSONB), `status`, `expires_at`, `resolved_at`, `result` |
 | `audit_log` | Журнал значимых изменений (без чувствительного содержимого) | `actor`, `action`, `entity_type/id`, `result`, `meta`, `created_at` |
 | `processed_updates` | Идемпотентность Telegram-апдейтов | PK `update_id`, `created_at` |
+| `improvement_items` | Improvement backlog (Stage 2) | `category`, `source`, `status`, `confidence`, `occurrence_count`, `correlation_id`, `diagnostic_context` (JSONB), `merged_from` |
+| `improvement_events` | Отдельные случаи/повторы записи backlog | `item_id` (FK, CASCADE), `occurred_at`, `correlation_id`, `note`, `diagnostic_context` |
 
 Общие миксины (`db/base.py`): `TimestampMixin` (`created_at`, `updated_at`) и
 `SoftDeleteMixin` (`deleted_at`). Удаление сущностей — мягкое, кроме жёсткого

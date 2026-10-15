@@ -661,3 +661,39 @@ async def test_scenario_export_issues(test_settings, session_factory, session, t
     assert "hunter2secret" not in markdown
     assert payload["count"] == 1
     assert "hunter2secret" not in json.dumps(payload, ensure_ascii=False)
+
+
+# 19. Типизированный UI: LLM просит кнопки, сервер собирает их по allow-list.
+async def test_scenario_typed_ui_quick_actions(test_settings, session_factory, session):
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="Позвонить в сервис", bucket=TaskBucket.TODAY)
+    )
+    await session.commit()
+
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="smalltalk",
+            reply="Привет! Вот что могу:",
+            ui_request={
+                "component": "quick_actions",
+                "actions": ["tasks_today", "search"],
+            },
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+    messages = await harness.send_text(DEFAULT_USER_ID, "Привет, что ты умеешь?")
+
+    reply_message = keyboard_messages(messages)[-1]
+    labels = [
+        button.text
+        for row in reply_message.reply_markup.inline_keyboard
+        for button in row
+    ]
+    assert "🔸 Задачи на сегодня" in labels
+    assert "🔎 Поиск" in labels
+
+    # Кнопка ведёт в настоящий сценарий списка задач.
+    await harness.click_button(DEFAULT_USER_ID, reply_message, "Задачи на сегодня")
+    list_view = harness.current(reply_message)
+    assert "Позвонить в сервис" in (list_view.text or "")

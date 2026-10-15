@@ -11,6 +11,7 @@ from jarvis.bot.keyboards import (
     confirm_keyboard,
     force_save_keyboard,
     main_menu,
+    quick_actions_keyboard,
     search_results_keyboard,
 )
 from jarvis.conversation.engine import EngineOutcome
@@ -50,7 +51,9 @@ async def send_outcome(message: Message, outcome: EngineOutcome) -> None:
         markup = cancel_flow_keyboard()
     elif outcome.force_save:
         markup = force_save_keyboard()
-    elif outcome.menu:
+    elif outcome.ui_actions:
+        markup = quick_actions_keyboard(outcome.ui_actions)
+    if markup is None and outcome.menu:
         markup = main_menu()
 
     chunks = split_message(outcome.text or "…")

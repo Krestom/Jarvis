@@ -63,7 +63,13 @@ intent:
    evidence — фраза/факт из сообщения, confidence — честная уверенность 0..1,
    насколько это следует из сообщения. Для обычных задач, заметок и вопросов
    оставляй improvement_hypothesis = null.
-10. Отвечай только JSON, без пояснений.
+10. ui_request — необязательный запрос быстрых кнопок к ответу. Допустим только
+    для ответов-подсказок (smalltalk, unknown): {"component": "quick_actions",
+    "actions": [...]}. Допустимые actions: search, tasks_today, tasks_week,
+    tasks_inbox, documents, projects, settings, diagnostics. Не выдумывай
+    действия вне списка, не дублируй их и не добавляй ui_request к операциям
+    создания/изменения записей.
+11. Отвечай только JSON, без пояснений.
 """
 
 
