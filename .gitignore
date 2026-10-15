@@ -1,0 +1,25 @@
+# secrets and local config
+.env
+.env.local
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# runtime data (local runs without docker)
+var/
+backups/
+
+# editors / os
+.idea/
+.vscode/
+Thumbs.db

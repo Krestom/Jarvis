@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis"
+version = "0.1.0"
+description = "Telegram-first personal knowledge OS with encrypted document storage and read-only MCP access"
+requires-python = ">=3.12"
+dependencies = [
+  "aiohttp-socks>=0.10,<1",
+  "aiogram>=3.31,<4",
+  "alembic>=1.20,<2",
+  "asyncpg>=0.32,<1",
+  "cryptography>=50,<51",
+  "fastapi>=0.143,<1",
+  "httpx>=0.28,<1",
+  "mcp>=2.3,<3",
+  "pydantic>=2.12,<2.14",
+  "pydantic-settings>=2.16,<3",
+  "sqlalchemy[asyncio]>=2.1,<2.2",
+  "tzdata>=2025.1",
+  "uvicorn>=0.54,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=1.4",
+  "ruff>=0.9",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "integration: requires a running PostgreSQL (see compose.yaml)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

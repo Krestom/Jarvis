@@ -1,0 +1,42 @@
+// Пример конфигурации Jarvis MCP для OpenCode (v2).
+// Основной вариант — remote через ssh-туннель до сервера:
+//
+//   ssh -N -L 8765:127.0.0.1:8765 user@SERVER
+//   export JARVIS_MCP_TOKEN=<MCP_AUTH_TOKEN из .env на сервере>
+//
+// Токен хранится в переменной окружения, не в конфиге.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "jarvis": {
+        "type": "remote",
+        "url": "http://127.0.0.1:8765/mcp",
+        // Статический bearer-токен вместо OAuth:
+        "oauth": false,
+        "headers": {
+          "Authorization": "Bearer {env:JARVIS_MCP_TOKEN}"
+        },
+        // Инструменты только на чтение; отключать точечно ни к чему, но при
+        // желании можно скрыть отдельные: "permissions": [...]
+      }
+    }
+  }
+}
+
+// Вариант для локальной разработки (Jarvis целиком на этой машине):
+// контейнер mcp не нужен, OpenCode сам запускает stdio-процесс. Требуются
+// установленный пакет (pip install -e .) и доступный PostgreSQL.
+//
+// {
+//   "$schema": "https://opencode.ai/config.json",
+//   "mcp": {
+//     "servers": {
+//       "jarvis": {
+//         "type": "local",
+//         "command": ["python", "-m", "jarvis.mcp", "--stdio"],
+//         "cwd": "D:/agent_projects/Jarvis"
+//       }
+//     }
+//   }
+// }

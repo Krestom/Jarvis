@@ -1,0 +1,12 @@
+# Нормализация переводов строк: LF в репозитории.
+* text=auto
+# Shell-скрипты обязаны иметь LF, иначе они не работают на Linux-сервере.
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.ini text eol=lf
+*.mako text eol=lf
+*.jsonc text eol=lf
+Dockerfile text eol=lf

@@ -1,0 +1,91 @@
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from jarvis.domain.enums import TaskStatus
+from jarvis.repositories.categories import CategoryRepository
+from jarvis.repositories.tasks import TaskRepository
+from jarvis.services.drafts import TaskDraft, TaskUpdate
+from jarvis.services.errors import NotFoundError, OperationError
+
+TASK_VIEWS = ("today", "week", "long_term", "someday", "no_group", "inbox", "done")
+
+
+class TaskService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._repo = TaskRepository(session)
+        self._categories = CategoryRepository(session)
+
+    async def _ensure_category(self, category_id: uuid.UUID | None) -> None:
+        if category_id is None:
+            return
+        if await self._categories.get(category_id) is None:
+            raise OperationError("Категория не найдена")
+
+    async def create_from_draft(self, draft: TaskDraft) -> uuid.UUID:
+        await self._ensure_category(draft.category_id)
+        fields = draft.model_dump()
+        if fields["status"] == TaskStatus.DONE:
+            fields["completed_at"] = datetime.now(UTC)
+        task = await self._repo.create(**fields)
+        return task.id
+
+    async def apply_update(self, task_id: uuid.UUID, changes: dict) -> uuid.UUID:
+        task = await self._repo.get(task_id)
+        if task is None:
+            raise NotFoundError("Задача не найдена")
+        update = TaskUpdate.model_validate(changes)
+        fields = update.model_dump(exclude_unset=True)
+        if "category_id" in fields:
+            await self._ensure_category(fields["category_id"])
+        new_status = fields.get("status")
+        if new_status is not None and new_status != task.status:
+            if new_status == TaskStatus.DONE:
+                fields["completed_at"] = datetime.now(UTC)
+            elif task.status == TaskStatus.DONE:
+                fields["completed_at"] = None
+        await self._repo.update(task, **fields)
+        return task.id
+
+    async def soft_delete(self, task_id: uuid.UUID) -> uuid.UUID:
+        task = await self._repo.get(task_id)
+        if task is None:
+            raise NotFoundError("Задача не найдена")
+        await self._repo.soft_delete(task)
+        return task.id
+
+    async def get(self, task_id: uuid.UUID):
+        return await self._repo.get(task_id)
+
+    async def list_view(
+        self,
+        view: str,
+        *,
+        now: datetime,
+        tz: ZoneInfo,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list:
+        if view == "today":
+            return await self._repo.list_today(now, tz, limit=limit, offset=offset)
+        if view == "week":
+            return await self._repo.list_week(now, tz, limit=limit, offset=offset)
+        if view == "long_term":
+            return await self._repo.list_long_term(now, tz, limit=limit, offset=offset)
+        if view == "someday":
+            return await self._repo.list_someday(limit=limit, offset=offset)
+        if view == "no_group":
+            return await self._repo.list_no_group(limit=limit, offset=offset)
+        if view == "inbox":
+            return await self._repo.list_inbox(limit=limit, offset=offset)
+        if view == "done":
+            return await self._repo.list_done(limit=limit, offset=offset)
+        raise OperationError(f"Неизвестный список задач: {view}")
+
+    async def count_active(self) -> int:
+        return await self._repo.count_active()

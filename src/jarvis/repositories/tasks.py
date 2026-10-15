@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from jarvis.db.models import Task
+from jarvis.domain.buckets import DONE_STATUSES, today_window, week_window
+from jarvis.domain.enums import TaskBucket, TaskStatus
+
+
+def _active() -> tuple[ColumnElement[bool], ColumnElement[bool]]:
+    return Task.deleted_at.is_(None), Task.status.not_in(DONE_STATUSES)
+
+
+class TaskRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, **fields: Any) -> Task:
+        task = Task(**fields)
+        self._session.add(task)
+        await self._session.flush()
+        return task
+
+    async def get(self, task_id: uuid.UUID) -> Task | None:
+        result = await self._session.execute(
+            select(Task).where(Task.id == task_id, Task.deleted_at.is_(None))
+        )
+        return result.scalar_one_or_none()
+
+    async def update(self, task: Task, **fields: Any) -> Task:
+        for key, value in fields.items():
+            setattr(task, key, value)
+        await self._session.flush()
+        return task
+
+    async def soft_delete(self, task: Task) -> None:
+        task.deleted_at = func.now()
+        await self._session.flush()
+
+    # --- Списки (динамические группы, см. domain/buckets.py) ---
+
+    def _today_cond(self, now: datetime, tz: ZoneInfo) -> ColumnElement[bool]:
+        _, end_today = today_window(now, tz)
+        return or_(Task.bucket == TaskBucket.TODAY, Task.due_at < end_today)
+
+    async def list_today(
+        self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
+    ) -> list[Task]:
+        stmt = (
+            select(Task)
+            .where(*_active(), self._today_cond(now, tz))
+            .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_week(
+        self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
+    ) -> list[Task]:
+        _, end_today = today_window(now, tz)
+        _, end_week = week_window(now, tz)
+        due_this_week = (Task.due_at >= end_today) & (Task.due_at < end_week)
+        week_bucket_not_today = (Task.bucket == TaskBucket.WEEK) & or_(
+            Task.due_at.is_(None), Task.due_at >= end_today
+        )
+        stmt = (
+            select(Task)
+            .where(*_active(), or_(due_this_week, week_bucket_not_today))
+            .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_long_term(
+        self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
+    ) -> list[Task]:
+        _, end_week = week_window(now, tz)
+        stmt = (
+            select(Task)
+            .where(*_active(), or_(Task.bucket == TaskBucket.LONG_TERM, Task.due_at >= end_week))
+            .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_someday(self, *, limit: int = 20, offset: int = 0) -> list[Task]:
+        stmt = (
+            select(Task)
+            .where(*_active(), Task.bucket == TaskBucket.SOMEDAY)
+            .order_by(Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_no_group(self, *, limit: int = 20, offset: int = 0) -> list[Task]:
+        stmt = (
+            select(Task)
+            .where(*_active(), Task.bucket.is_(None), Task.due_at.is_(None))
+            .order_by(Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_inbox(self, *, limit: int = 20, offset: int = 0) -> list[Task]:
+        stmt = (
+            select(Task)
+            .where(
+                Task.deleted_at.is_(None),
+                Task.status == TaskStatus.INBOX,
+            )
+            .order_by(Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_done(self, *, limit: int = 20, offset: int = 0) -> list[Task]:
+        stmt = (
+            select(Task)
+            .where(Task.deleted_at.is_(None), Task.status == TaskStatus.DONE)
+            .order_by(Task.completed_at.desc().nulls_last(), Task.updated_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def count_active(self) -> int:
+        result = await self._session.execute(
+            select(func.count()).select_from(Task).where(*_active())
+        )
+        return int(result.scalar_one())
+
+    async def list_for_project(self, project_id: uuid.UUID, *, limit: int = 20) -> list[Task]:
+        stmt = (
+            select(Task)
+            .where(Task.deleted_at.is_(None), Task.project_id == project_id)
+            .order_by(Task.updated_at.desc())
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def search(self, query: str, *, limit: int = 10, offset: int = 0) -> list[Task]:
+        tsquery = func.websearch_to_tsquery("russian", query)
+        stmt = (
+            select(Task)
+            .where(
+                Task.deleted_at.is_(None),
+                Task.search_vector.op("@@")(tsquery),
+            )
+            .order_by(
+                func.ts_rank(Task.search_vector, tsquery).desc(),
+                Task.created_at.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
