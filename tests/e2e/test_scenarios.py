@@ -102,8 +102,13 @@ async def test_scenario_text_note_to_search(test_settings, session_factory, sess
 
 # 2. Голосовая задача -> транскрибация -> подтверждение -> задача с группой/сроком.
 async def test_scenario_voice_task(test_settings, session_factory, session):
+    from zoneinfo import ZoneInfo
+
     ai = FakeProvider()
-    tomorrow = (datetime.now(UTC) + timedelta(days=1)).replace(
+    # «Завтра 18:00» считаем в таймзоне пользователя: UTC-вариант ломается
+    # поздно вечером, когда в МСК уже наступил следующий день.
+    tz = ZoneInfo(test_settings.app_timezone)
+    tomorrow = (datetime.now(tz) + timedelta(days=1)).replace(
         hour=18, minute=0, second=0, microsecond=0
     )
     ai.queue(
@@ -134,6 +139,30 @@ async def test_scenario_voice_task(test_settings, session_factory, session):
     tasks = await TaskRepository(session).list_week(datetime.now(UTC), test_settings.tz)
     assert len(tasks) == 1
     assert tasks[0].title == "Обновить инфраструктуру"
+
+
+# 2b. Ошибка/лимит транскрибации показывается прямо в чате.
+async def test_scenario_voice_transcription_error_shown(
+    test_settings, session_factory, session
+):
+    from jarvis.transcription.provider import TranscriptionError
+
+    transcription = FakeTranscription(
+        errors=[
+            TranscriptionError(
+                "превышен лимит сервиса транскрибации (HTTP 429): "
+                "Rate limit reached for whisper-large-v3-turbo"
+            )
+        ]
+    )
+    harness = await make_harness(
+        test_settings, session_factory, transcription=transcription
+    )
+
+    messages = await harness.send_voice(DEFAULT_USER_ID)
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Не получилось распознать" in combined
+    assert "лимит" in combined and "HTTP 429" in combined
 
 
 # 3. Сценарий с документом и восстановлением состояния после «рестарта».

@@ -44,7 +44,23 @@ async def test_transcribe_http_error():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="boom")
 
-    with pytest.raises(TranscriptionError, match="ошибку"):
+    with pytest.raises(TranscriptionError, match="ошибку \\(HTTP 500\\)"):
+        await make_provider(handler).transcribe(b"x", filename="v.ogg")
+
+
+async def test_transcribe_rate_limit_reports_groq_detail():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "message": "Rate limit reached for whisper-large-v3-turbo (TPD)",
+                    "type": "tokens",
+                }
+            },
+        )
+
+    with pytest.raises(TranscriptionError, match="лимит.*429.*Rate limit"):
         await make_provider(handler).transcribe(b"x", filename="v.ogg")
 
 

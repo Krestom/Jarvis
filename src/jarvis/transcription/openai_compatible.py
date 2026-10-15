@@ -56,8 +56,13 @@ class OpenAICompatibleTranscription:
         except httpx.HTTPError as error:
             raise TranscriptionError("сервис транскрибации недоступен") from error
         if response.status_code >= 400:
+            detail = _error_detail(response)
             log.warning("transcription API error status=%s", response.status_code)
-            raise TranscriptionError("сервис транскрибации вернул ошибку")
+            if response.status_code == 429:
+                message = "превышен лимит сервиса транскрибации (HTTP 429)"
+            else:
+                message = f"сервис транскрибации вернул ошибку (HTTP {response.status_code})"
+            raise TranscriptionError(f"{message}: {detail}" if detail else message)
         try:
             payload = response.json()
         except ValueError as error:
@@ -66,3 +71,18 @@ class OpenAICompatibleTranscription:
         if not text:
             raise TranscriptionError("транскрибация вернула пустой результат")
         return text
+
+
+def _error_detail(response: httpx.Response) -> str:
+    """Короткая причина из тела ошибки (без ключей и служебных заголовков)."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"])[:200]
+        if isinstance(error, str):
+            return error[:200]
+    return ""
