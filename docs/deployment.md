@@ -150,7 +150,7 @@ scp -r backups/jarvis-backup-<штамп> user@SERVER:/opt/jarvis/backups-in/
 
 # НА СЕРВЕРЕ (из /opt/jarvis), пока app ещё не запускался и БД пустая:
 docker compose up -d postgres
-# 1) восстановить дамп БД (custom-формат pg_dump)
+# 1) восстановить дамп БД (custom-формат pg_dump; -U/-d — как POSTGRES_USER/POSTGRES_DB в .env)
 docker compose exec -T postgres pg_restore \
   -U jarvis -d jarvis --no-owner < backups-in/jarvis-backup-<штамп>/pg.dump
 # 2) восстановить том файлов (имя тома compose-проекта: jarvis_jarvis-files)
