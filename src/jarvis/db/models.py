@@ -264,6 +264,20 @@ class Secret(Base, TimestampMixin, SoftDeleteMixin):
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
+class TaskComment(Base, TimestampMixin, SoftDeleteMixin):
+    """Комментарий к задаче: добавляется и редактируется через подтверждение."""
+
+    __tablename__ = "task_comments"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (Index("ix_task_comments_task", "task_id", "created_at"),)
+
+
 # --- Связи -------------------------------------------------------------------
 
 

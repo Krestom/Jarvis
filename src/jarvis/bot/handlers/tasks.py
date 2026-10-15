@@ -8,15 +8,25 @@ from aiogram import Router
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import TaskCB, TaskListCB, uuid_hex
 from jarvis.bot.formatting import esc, split_message, task_line
 from jarvis.bot.handlers.open_entity import parse_hex_uuid, render_task_card
-from jarvis.bot.handlers.render import propose_and_send
-from jarvis.bot.keyboards import PAGE_SIZE, bucket_keyboard, main_menu, task_list_keyboard
+from jarvis.bot.handlers.render import propose_and_send, send_outcome
+from jarvis.bot.keyboards import (
+    PAGE_SIZE,
+    bucket_keyboard,
+    comments_keyboard,
+    main_menu,
+    task_list_keyboard,
+)
 from jarvis.config.settings import Settings
+from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
+from jarvis.conversation.preview import fmt_dt_local
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import EntityType, PendingOpType, TaskBucket
+from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.links import LinkRepository
 from jarvis.repositories.tasks import TaskRepository
@@ -79,7 +89,11 @@ async def task_list(
 
 
 async def task_action(
-    callback: CallbackQuery, callback_data: TaskCB, session: AsyncSession, settings: Settings
+    callback: CallbackQuery,
+    callback_data: TaskCB,
+    session: AsyncSession,
+    settings: Settings,
+    ai: AIProvider,
 ) -> None:
     user_id = callback.from_user.id
     action = callback_data.action
@@ -179,6 +193,61 @@ async def task_action(
             PendingOpType.DELETE_TASK,
             {"entity_id": str(task.id)},
         )
+        return
+
+    if action == "comments":
+        comments = await TaskCommentRepository(session).list_for_task(task.id)
+        await callback.answer()
+        if not comments:
+            await callback.message.answer(
+                f"💬 Комментариев к «{esc(task.title)}» пока нет.",
+                reply_markup=comments_keyboard([], uuid_hex(task.id)),
+            )
+            return
+        lines = [f"💬 <b>Комментарии</b> — {esc(task.title)}", ""]
+        for index, comment in enumerate(comments, start=1):
+            stamp = fmt_dt_local(comment.created_at, settings.tz)
+            lines.append(f"<b>{index}.</b> {esc(comment.content)}\n<i>{stamp}</i>")
+        for chunk in split_message("\n".join(lines)):
+            await callback.message.answer(chunk)
+        await callback.message.answer(
+            "Действия:", reply_markup=comments_keyboard(comments, uuid_hex(task.id))
+        )
+        return
+
+    if action == "comment_add":
+        store = ConversationStore(ConversationRepository(session), settings)
+        await store.set(user_id, Flow.AWAIT_COMMENT, data={"task_id": str(task.id)})
+        await callback.answer()
+        await callback.message.answer(
+            f"Напишите комментарий к «{esc(task.title)}» (текстом или голосом)."
+        )
+        return
+
+    if action == "comment_edit":
+        comment_id = parse_hex_uuid(callback_data.value)
+        comment = await TaskCommentRepository(session).get(comment_id) if comment_id else None
+        if comment is None:
+            await callback.answer("Комментарий не найден", show_alert=True)
+            return
+        store = ConversationStore(ConversationRepository(session), settings)
+        await store.set(
+            user_id,
+            Flow.EDIT_COMMENT,
+            data={"comment_id": str(comment.id), "task_id": str(task.id)},
+        )
+        await callback.answer()
+        preview = comment.content if len(comment.content) <= 300 else comment.content[:299] + "…"
+        await callback.message.answer(
+            f"Пришлите новую версию комментария.\n\n<i>{esc(preview)}</i>"
+        )
+        return
+
+    if action == "comment_choose":
+        engine = ConversationEngine(session, settings, ai)
+        outcome = await engine.choose_task_for_comment(user_id, str(task.id))
+        await callback.answer()
+        await send_outcome(callback.message, outcome)
         return
 
     if action == "related":

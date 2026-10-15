@@ -6,7 +6,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jarvis.bot.formatting import document_card_text, knowledge_card_text, task_card_text
+from jarvis.bot.formatting import document_card_text, esc, knowledge_card_text, task_card_text
 from jarvis.bot.keyboards import (
     document_card_keyboard,
     knowledge_card_keyboard,
@@ -28,6 +28,8 @@ def parse_hex_uuid(value: str) -> uuid.UUID | None:
 
 
 async def render_task_card(session: AsyncSession, settings: Settings, task_id: uuid.UUID):
+    from jarvis.repositories.comments import TaskCommentRepository
+
     task = await TaskRepository(session).get(task_id)
     if task is None:
         return None, None
@@ -36,7 +38,18 @@ async def render_task_card(session: AsyncSession, settings: Settings, task_id: u
         category = await CategoryRepository(session).get(task.category_id)
         category_name = category.name if category else None
     text = task_card_text(task, settings.tz, category_name)
-    markup = task_card_keyboard(uuid_hex(task.id), task.status.value)
+
+    comments = await TaskCommentRepository(session).list_for_task(task_id)
+    if comments:
+        text += "\n\n💬 <b>Комментарии</b>"
+        for index, comment in enumerate(comments[-3:], start=1):
+            raw = comment.content
+            preview = raw if len(raw) <= 200 else raw[:199] + "…"
+            text += f"\n{index}. {esc(preview)}"
+        if len(comments) > 3:
+            text += f"\n<i>…и ещё {len(comments) - 3}</i>"
+
+    markup = task_card_keyboard(uuid_hex(task.id), task.status.value, len(comments))
     return text, markup
 
 

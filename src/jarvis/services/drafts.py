@@ -36,6 +36,7 @@ class TaskDraft(BaseModel):
     due_at: datetime | None = None
     category_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
+    project_name: str | None = Field(default=None, max_length=200)
 
 
 class TaskUpdate(BaseModel):
@@ -51,6 +52,17 @@ class TaskUpdate(BaseModel):
     project_id: uuid.UUID | None = None
 
 
+class CommentDraft(BaseModel):
+    task_id: uuid.UUID
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class CommentUpdate(BaseModel):
+    comment_id: uuid.UUID
+    task_id: uuid.UUID  # для аудита и навигации
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class KnowledgeDraft(BaseModel):
     type: KnowledgeType = KnowledgeType.NOTE
     title: str = Field(min_length=1, max_length=300)
@@ -60,6 +72,7 @@ class KnowledgeDraft(BaseModel):
     original_text: str | None = None
     category_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
+    project_name: str | None = Field(default=None, max_length=200)
     sensitivity: Sensitivity = Sensitivity.NORMAL
 
 

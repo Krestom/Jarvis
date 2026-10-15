@@ -7,7 +7,9 @@ from aiogram.types import Message
 from jarvis.bot.formatting import esc, split_message
 from jarvis.bot.keyboards import (
     cancel_flow_keyboard,
+    comment_target_keyboard,
     confirm_keyboard,
+    force_save_keyboard,
     main_menu,
     search_results_keyboard,
 )
@@ -46,12 +48,22 @@ async def send_outcome(message: Message, outcome: EngineOutcome) -> None:
         markup = confirm_keyboard(outcome.pending_op_id)
     elif outcome.awaiting_document or outcome.awaiting_secret:
         markup = cancel_flow_keyboard()
+    elif outcome.force_save:
+        markup = force_save_keyboard()
     elif outcome.menu:
         markup = main_menu()
 
     chunks = split_message(outcome.text or "…")
     for index, chunk in enumerate(chunks):
         await message.answer(chunk, reply_markup=markup if index == len(chunks) - 1 else None)
+
+    if outcome.task_choices:
+        await message.answer(
+            "Выберите задачу:",
+            reply_markup=comment_target_keyboard(
+                outcome.task_choices, action=outcome.task_choices_action
+            ),
+        )
 
 
 async def send_search_results(message: Message, outcome: EngineOutcome) -> None:

@@ -121,6 +121,8 @@ class PendingOpType(StrEnum):
     CREATE_TASK = "create_task"
     UPDATE_TASK = "update_task"
     DELETE_TASK = "delete_task"
+    CREATE_COMMENT = "create_comment"
+    UPDATE_COMMENT = "update_comment"
     CREATE_KNOWLEDGE = "create_knowledge"
     UPDATE_KNOWLEDGE = "update_knowledge"
     DELETE_KNOWLEDGE = "delete_knowledge"

@@ -27,9 +27,25 @@ class TaskService:
         if await self._categories.get(category_id) is None:
             raise OperationError("Категория не найдена")
 
+    async def _resolve_project(self, draft: TaskDraft) -> uuid.UUID | None:
+        if draft.project_id is not None:
+            return draft.project_id
+        name = (draft.project_name or "").strip()
+        if not name:
+            return None
+        from jarvis.repositories.projects import ProjectRepository
+
+        repo = ProjectRepository(self._session)
+        project = await repo.find_by_name(name)
+        if project is None:
+            project = await repo.create(name=name[:200])
+        return project.id
+
     async def create_from_draft(self, draft: TaskDraft) -> uuid.UUID:
         await self._ensure_category(draft.category_id)
         fields = draft.model_dump()
+        fields.pop("project_name", None)
+        fields["project_id"] = await self._resolve_project(draft)
         if fields["status"] == TaskStatus.DONE:
             fields["completed_at"] = datetime.now(UTC)
         task = await self._repo.create(**fields)

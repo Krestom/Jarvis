@@ -24,9 +24,27 @@ class KnowledgeService:
         if await self._categories.get(category_id) is None:
             raise OperationError("Категория не найдена")
 
+    async def _resolve_project(self, draft: KnowledgeDraft) -> uuid.UUID | None:
+        """Проект по id, либо по имени (создаётся, если ещё нет)."""
+        if draft.project_id is not None:
+            return draft.project_id
+        name = (draft.project_name or "").strip()
+        if not name:
+            return None
+        from jarvis.repositories.projects import ProjectRepository
+
+        repo = ProjectRepository(self._session)
+        project = await repo.find_by_name(name)
+        if project is None:
+            project = await repo.create(name=name[:200])
+        return project.id
+
     async def create_from_draft(self, draft: KnowledgeDraft) -> uuid.UUID:
         await self._ensure_category(draft.category_id)
-        item = await self._repo.create(**draft.model_dump())
+        fields = draft.model_dump()
+        fields.pop("project_name", None)
+        fields["project_id"] = await self._resolve_project(draft)
+        item = await self._repo.create(**fields)
         return item.id
 
     async def apply_update(self, item_id: uuid.UUID, changes: dict) -> uuid.UUID:

@@ -290,3 +290,202 @@ async def test_scenario_secret_flow(test_settings, session_factory, session):
     # Поиск не находит секреты: значение не является знанием.
     results = await harness.send_text(DEFAULT_USER_ID, "найди AAAATESTKEY")
     assert any("Ничего не нашёл" in (m.text or "") for m in results)
+
+
+# 9. Комментарии к задаче через карточку: добавить, увидеть, отредактировать.
+async def test_scenario_task_comments_via_card(test_settings, session_factory, session):
+    task_id = await TaskService(session).create_from_draft(
+        TaskDraft(title="Проверить бэкап", bucket=TaskBucket.TODAY)
+    )
+    await session.commit()
+
+    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+    messages = await harness.send_text(DEFAULT_USER_ID, "/today")
+    list_message = keyboard_messages(messages)[-1]
+
+    card_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "1. Проверить бэкап")
+    card_message = keyboard_messages(card_messages)[-1]
+
+    comments_menu = await harness.click_button(DEFAULT_USER_ID, card_message, "Комментарии")
+    empty_menu = keyboard_messages(comments_menu)[-1]
+    assert any("пока нет" in (m.text or "") for m in comments_menu)
+
+    prompt = await harness.click_button(DEFAULT_USER_ID, empty_menu, "Добавить комментарий")
+    assert any("Напишите комментарий" in (m.text or "") for m in prompt)
+
+    proposal = await harness.send_text(DEFAULT_USER_ID, "Позвонить в поддержку сервера")
+    assert any("Добавить комментарий?" in (m.text or "") for m in proposal)
+
+    await confirm_last(harness, DEFAULT_USER_ID, proposal)
+    await session.commit()
+
+    from jarvis.repositories.comments import TaskCommentRepository
+
+    comments = await TaskCommentRepository(session).list_for_task(task_id)
+    assert [comment.content for comment in comments] == ["Позвонить в поддержку сервера"]
+
+    # Комментарии видны в карточке задачи.
+    card_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "1. Проверить бэкап")
+    assert any("Позвонить в поддержку сервера" in (m.text or "") for m in card_messages)
+
+
+# 10. Естественный язык: «добавь к задаче …» → выбор задачи → комментарий.
+async def test_scenario_add_comment_natural_language(test_settings, session_factory, session):
+    service = TaskService(session)
+    task_infra_id = await service.create_from_draft(TaskDraft(title="Обновить инфраструктуру"))
+    await service.create_from_draft(TaskDraft(title="Обновить документацию"))
+    await session.commit()
+
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="add_comment",
+            entities={
+                "target_task": "обновить",
+                "content": "Согласовать окно с провайдером",
+            },
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, "Добавь к задаче про обновление: согласовать окно с провайдером"
+    )
+    assert any("К какой задаче добавить комментарий?" in (m.text or "") for m in messages)
+
+    choice_message = keyboard_messages(messages)[-1]
+    proposal = await harness.click_button(
+        DEFAULT_USER_ID, choice_message, "Обновить инфраструктуру"
+    )
+    assert any("Добавить комментарий?" in (m.text or "") for m in proposal)
+
+    await confirm_last(harness, DEFAULT_USER_ID, proposal)
+    await session.commit()
+
+    from jarvis.repositories.comments import TaskCommentRepository
+
+    comments = await TaskCommentRepository(session).list_for_task(task_infra_id)
+    assert [comment.content for comment in comments] == ["Согласовать окно с провайдером"]
+
+
+# 11. Сообщение с секретом: кнопка «Всё равно сохранить» сохраняет как чувствительную заметку.
+async def test_scenario_force_save_secret(test_settings, session_factory, session):
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="create_knowledge",
+            entities={"title": "Пароль от роутера", "content": "password=SuperSecret123"},
+            sensitivity_hints=["secret"],
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, "Запомни пароль от роутера: password=SuperSecret123"
+    )
+    assert any("есть секрет" in (m.text or "") for m in messages)
+    assert any("Всё равно сохранить" in (b.text or "")
+               for m in messages if isinstance(m.reply_markup, InlineKeyboardMarkup)
+               for row in m.reply_markup.inline_keyboard for b in row)
+
+    force_message = keyboard_messages(messages)[-1]
+    chosen = await harness.click_button(DEFAULT_USER_ID, force_message, "Всё равно сохранить")
+    assert any("Сохранить запись?" in (m.text or "") for m in chosen)
+
+    await confirm_last(harness, DEFAULT_USER_ID, chosen)
+    await session.commit()
+
+    from jarvis.domain.enums import Sensitivity
+
+    items = await KnowledgeRepository(session).list_recent()
+    assert len(items) == 1
+    assert items[0].sensitivity == Sensitivity.SENSITIVE
+    assert "SuperSecret123" in items[0].content
+
+
+# 12. «Какие у меня задачи на неделю» — выводим список, а не «ничего не нашёл».
+async def test_scenario_list_tasks(test_settings, session_factory, session):
+    service = TaskService(session)
+    await service.create_from_draft(TaskDraft(title="Обновить дашборд", bucket=TaskBucket.WEEK))
+    await service.create_from_draft(TaskDraft(title="Позвонить в сервис", bucket=TaskBucket.TODAY))
+    await session.commit()
+
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(intent="list_tasks", entities={"view": "week"}, confidence=0.95)
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+    messages = await harness.send_text(DEFAULT_USER_ID, "Какие у меня задачи на этой неделе?")
+
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Обновить дашборд" in combined
+    assert "ничего не нашёл" not in combined.lower()
+
+
+# 13. «Какие комментарии к задаче X» — показываем комментарии.
+async def test_scenario_list_comments(test_settings, session_factory, session):
+    task_id = await TaskService(session).create_from_draft(
+        TaskDraft(title="Обновить инфраструктуру")
+    )
+    from jarvis.repositories.comments import TaskCommentRepository
+
+    await TaskCommentRepository(session).create(task_id, "Согласовано окно с провайдером")
+    await session.commit()
+
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="list_comments",
+            entities={"target_task": "инфраструктуру"},
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, "Какие комментарии у меня к задаче про инфраструктуру?"
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Согласовано окно с провайдером" in combined
+
+
+# 14. «Сохрани креды в проект SuperSport» — проект создаётся, запись привязывается.
+async def test_scenario_credentials_into_project(test_settings, session_factory, session):
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="create_knowledge",
+            entities={
+                "title": "Креды SuperSport",
+                "content": "логин: admin, пароль: qwerty-123",
+                "project": "SuperSport",
+            },
+            sensitivity_hints=["secret"],
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+    messages = await harness.send_text(
+        DEFAULT_USER_ID,
+        "Создай проект SuperSport и сохрани туда креды доступа: логин admin, пароль qwerty-123",
+    )
+    assert any("есть секрет" in (m.text or "") for m in messages)
+
+    force_message = keyboard_messages(messages)[-1]
+    chosen = await harness.click_button(DEFAULT_USER_ID, force_message, "Всё равно сохранить")
+    combined = " ".join(m.text or "" for m in chosen)
+    assert "Сохранить запись?" in combined
+    assert "SuperSport" in combined  # проект виден в превью
+
+    await confirm_last(harness, DEFAULT_USER_ID, chosen)
+    await session.commit()
+
+    from jarvis.domain.enums import Sensitivity
+    from jarvis.repositories.projects import ProjectRepository
+
+    project = await ProjectRepository(session).find_by_name("SuperSport")
+    assert project is not None
+
+    items = await KnowledgeRepository(session).list_recent()
+    assert len(items) == 1
+    assert items[0].sensitivity == Sensitivity.SENSITIVE
+    assert items[0].project_id == project.id

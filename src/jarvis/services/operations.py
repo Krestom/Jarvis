@@ -9,6 +9,7 @@ from jarvis.config.settings import Settings
 from jarvis.domain.enums import EntityType, PendingOpType, Relation
 from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.links import LinkRepository
+from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import (
     CategoryDraft,
     CategoryRename,
@@ -64,6 +65,31 @@ async def apply_operation(
         ref = EntityRef.model_validate(payload)
         await TaskService(session).soft_delete(ref.entity_id)
         return AppliedOperation(EntityType.TASK, ref.entity_id, "Задача удалена")
+
+    if operation_type == PendingOpType.CREATE_COMMENT:
+        from jarvis.repositories.comments import TaskCommentRepository
+        from jarvis.services.drafts import CommentDraft
+
+        draft = CommentDraft.model_validate(payload)
+        task = await TaskRepository(session).get(draft.task_id)
+        if task is None:
+            raise NotFoundError("Задача не найдена")
+        await TaskCommentRepository(session).create(draft.task_id, draft.content)
+        return AppliedOperation(
+            EntityType.TASK, draft.task_id, f"Комментарий добавлен к «{task.title}»"
+        )
+
+    if operation_type == PendingOpType.UPDATE_COMMENT:
+        from jarvis.repositories.comments import TaskCommentRepository
+        from jarvis.services.drafts import CommentUpdate
+
+        update = CommentUpdate.model_validate(payload)
+        comments = TaskCommentRepository(session)
+        comment = await comments.get(update.comment_id)
+        if comment is None:
+            raise NotFoundError("Комментарий не найден")
+        await comments.update(comment, update.content)
+        return AppliedOperation(EntityType.TASK, update.task_id, "Комментарий обновлён")
 
     if operation_type == PendingOpType.CREATE_KNOWLEDGE:
         draft = KnowledgeDraft.model_validate(payload)

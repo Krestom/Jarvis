@@ -79,6 +79,8 @@ OPERATION_TITLES = {
     PendingOpType.CREATE_TASK: "Создать задачу?",
     PendingOpType.UPDATE_TASK: "Изменить задачу?",
     PendingOpType.DELETE_TASK: "Удалить задачу?",
+    PendingOpType.CREATE_COMMENT: "Добавить комментарий?",
+    PendingOpType.UPDATE_COMMENT: "Изменить комментарий?",
     PendingOpType.CREATE_KNOWLEDGE: "Сохранить запись?",
     PendingOpType.UPDATE_KNOWLEDGE: "Изменить запись?",
     PendingOpType.DELETE_KNOWLEDGE: "Удалить запись?",
@@ -118,6 +120,25 @@ async def _category_name(session: AsyncSession, category_id) -> str | None:
     return category.name if category else None
 
 
+async def _project_label(session: AsyncSession, payload: dict) -> str | None:
+    """Название проекта для превью; помечаем проект, который будет создан."""
+    from jarvis.repositories.projects import ProjectRepository
+
+    repo = ProjectRepository(session)
+    project_id = payload.get("project_id")
+    if project_id:
+        try:
+            project = await repo.get(uuid.UUID(str(project_id)))
+        except (ValueError, AttributeError):
+            project = None
+        return project.name if project else None
+    name = str(payload.get("project_name") or "").strip()
+    if not name:
+        return None
+    existing = await repo.find_by_name(name)
+    return name if existing else f"{name} (будет создан)"
+
+
 async def render_preview(
     session: AsyncSession,
     operation_type: PendingOpType,
@@ -149,6 +170,7 @@ async def render_preview(
             lines.append(_line("Приоритет", PRIORITY_LABELS.get(TaskPriority(priority), priority)))
         category = await _category_name(session, payload.get("category_id"))
         lines.append(_line("Категория", category))
+        lines.append(_line("Проект", await _project_label(session, payload)))
 
     elif operation_type == PendingOpType.UPDATE_TASK:
         changes = payload.get("changes", {})
@@ -161,6 +183,32 @@ async def render_preview(
             else:
                 lines.append("Задача не найдена.\n")
 
+    elif operation_type == PendingOpType.CREATE_COMMENT:
+        task_id = payload.get("task_id")
+        if task_id:
+            task = await TaskRepository(session).get(uuid.UUID(str(task_id)))
+            lines.append(_line("Задача", task.title if task else "не найдена"))
+        content = str(payload.get("content") or "")
+        preview = content if len(content) <= 300 else content[:299] + "…"
+        lines.append(f"\n<i>{html.escape(preview)}</i>")
+
+    elif operation_type == PendingOpType.UPDATE_COMMENT:
+        from jarvis.repositories.comments import TaskCommentRepository
+
+        comment_id = payload.get("comment_id")
+        comment = None
+        try:
+            comment = await TaskCommentRepository(session).get(uuid.UUID(str(comment_id)))
+        except (ValueError, TypeError):
+            comment = None
+        if comment is not None:
+            old = comment.content if len(comment.content) <= 120 else comment.content[:119] + "…"
+            new_raw = str(payload.get("content") or "")
+            new = new_raw if len(new_raw) <= 120 else new_raw[:119] + "…"
+            lines.append(f"<i>{html.escape(old)}</i> → {html.escape(new)}")
+        else:
+            lines.append("Комментарий не найден.\n")
+
     elif operation_type == PendingOpType.CREATE_KNOWLEDGE:
         ktype = payload.get("type", KnowledgeType.NOTE.value)
         lines.append(_line("Тип", KNOWLEDGE_TYPE_LABELS.get(KnowledgeType(ktype), ktype)))
@@ -170,6 +218,7 @@ async def render_preview(
             lines.append(_line("Сводка", summary))
         category = await _category_name(session, payload.get("category_id"))
         lines.append(_line("Категория", category))
+        lines.append(_line("Проект", await _project_label(session, payload)))
         sensitivity = payload.get("sensitivity", Sensitivity.NORMAL.value)
         if sensitivity != Sensitivity.NORMAL.value:
             lines.append(

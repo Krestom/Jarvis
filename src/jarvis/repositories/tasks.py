@@ -166,3 +166,30 @@ class TaskRepository:
             .offset(offset)
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def find_candidates(self, query: str | None, *, limit: int = 5) -> list[Task]:
+        """Кандидаты для привязки (комментария и т.п.): FTS, ILIKE, затем свежие."""
+        query = (query or "").strip()
+        if query:
+            found = await self.search(query, limit=limit)
+            if found:
+                return found
+            like = (
+                select(Task)
+                .where(
+                    Task.deleted_at.is_(None),
+                    Task.title.ilike(f"%{query[:80]}%"),
+                )
+                .order_by(Task.created_at.desc())
+                .limit(limit)
+            )
+            found = list((await self._session.execute(like)).scalars().all())
+            if found:
+                return found
+        recent = (
+            select(Task)
+            .where(*_active())
+            .order_by(Task.created_at.desc())
+            .limit(limit)
+        )
+        return list((await self._session.execute(recent)).scalars().all())

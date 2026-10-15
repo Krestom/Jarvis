@@ -6,6 +6,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from html import escape as html_escape
 from typing import Any
 
 from pydantic import BaseModel
@@ -22,7 +23,7 @@ from jarvis.conversation.heuristics import (
     is_question,
     looks_like_search,
 )
-from jarvis.conversation.preview import render_preview
+from jarvis.conversation.preview import fmt_dt_local, render_preview
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import (
     KnowledgeSource,
@@ -32,19 +33,33 @@ from jarvis.domain.enums import (
     TaskBucket,
     TaskPriority,
 )
+from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.projects import ProjectRepository
+from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.catalog import CatalogService
 from jarvis.services.confirmation import ConfirmationService
 from jarvis.services.drafts import KnowledgeDraft, TaskDraft
 from jarvis.services.search import SearchHit, SearchService
+from jarvis.services.tasks import TASK_VIEWS, TaskService
 
 log = logging.getLogger(__name__)
 
 SEARCH_PAGE_SIZE = 7
+TASK_LIST_LIMIT = 20
 
 _TASK_INTENTS = ("create_task",)
 _KNOWLEDGE_INTENTS = ("create_knowledge",)
+
+TASK_VIEW_LABELS = {
+    "today": "Задачи на сегодня",
+    "week": "Задачи на этой неделе",
+    "long_term": "Долгосрочные задачи",
+    "someday": "Когда-нибудь",
+    "no_group": "Без срока",
+    "inbox": "Inbox",
+    "done": "Выполненные",
+}
 
 
 @dataclass
@@ -57,6 +72,9 @@ class EngineOutcome:
     menu: bool = False
     awaiting_document: bool = False
     awaiting_secret: bool = False
+    force_save: bool = False
+    task_choices: list = field(default_factory=list)
+    task_choices_action: str = "comment_choose"
 
 
 class ConversationEngine:
@@ -143,6 +161,29 @@ class ConversationEngine:
                 {"task_id": task_id, "changes": {"due_at": parsed.isoformat()}},
             )
 
+        if state is not None and state.flow == Flow.AWAIT_COMMENT:
+            task_id = str(state.data.get("task_id", ""))
+            await self._store.clear(telegram_user_id)
+            if not task_id:
+                return EngineOutcome("Задача потерялась, откройте её заново из /tasks.")
+            from jarvis.services.drafts import CommentDraft
+
+            draft = CommentDraft(task_id=task_id, content=text[:4000])
+            return await self._propose(telegram_user_id, PendingOpType.CREATE_COMMENT, draft)
+
+        if state is not None and state.flow == Flow.EDIT_COMMENT:
+            data = dict(state.data)
+            await self._store.clear(telegram_user_id)
+            comment_id = str(data.get("comment_id", ""))
+            task_id = str(data.get("task_id", ""))
+            if not comment_id or not task_id:
+                return EngineOutcome("Комментарий потерялся, откройте задачу заново.")
+            return await self._propose_payload(
+                telegram_user_id,
+                PendingOpType.UPDATE_COMMENT,
+                {"comment_id": comment_id, "task_id": task_id, "content": text[:4000]},
+            )
+
         if looks_like_search(text):
             return await self._do_search(
                 telegram_user_id, extract_search_query(text), page=0
@@ -206,6 +247,29 @@ class ConversationEngine:
         if intent in _TASK_INTENTS:
             return await self._propose_task(telegram_user_id, text, interpretation, context)
 
+        if intent == "add_comment":
+            return await self._propose_comment(telegram_user_id, interpretation)
+
+        if intent == "list_comments":
+            return await self._show_comments(interpretation)
+
+        if intent == "list_tasks":
+            view = str(interpretation.entities.get("view") or "week").strip()
+            return await self._show_task_list(view)
+
+        if intent == "create_project":
+            name = str(interpretation.entities.get("name") or "").strip()
+            if not name:
+                return EngineOutcome("Как назвать проект?")
+            return await self._propose_payload(
+                telegram_user_id,
+                PendingOpType.CREATE_PROJECT,
+                {
+                    "name": name[:200],
+                    "description": interpretation.entities.get("description"),
+                },
+            )
+
         if intent in _KNOWLEDGE_INTENTS:
             return await self._propose_knowledge(telegram_user_id, text, interpretation, source)
 
@@ -251,7 +315,7 @@ class ConversationEngine:
             )
 
         category = await self._catalog.resolve_name(entities.get("category"))
-        project = await self._resolve_project(entities.get("project"))
+        project_name = str(entities.get("project") or "").strip() or None
         bucket = self._parse_bucket(entities.get("bucket"))
         priority = self._parse_priority(entities.get("priority"))
 
@@ -263,9 +327,69 @@ class ConversationEngine:
             bucket=bucket,
             priority=priority,
             category_id=category.id if category else None,
-            project_id=project.id if project else None,
+            project_name=project_name,
         )
         return await self._propose(telegram_user_id, PendingOpType.CREATE_TASK, draft)
+
+    async def _propose_comment(
+        self, telegram_user_id: int, interpretation: Interpretation
+    ) -> EngineOutcome:
+        """Комментарий к задаче: находим кандидатов и предлагаем выбор или операцию."""
+        entities = interpretation.entities
+        content = str(entities.get("content") or "").strip()
+        target = str(entities.get("target_task") or "").strip()
+        if not content:
+            await self._store.set(
+                telegram_user_id,
+                Flow.CLARIFY_DRAFT,
+                data={
+                    "original": "пользователь просит добавить комментарий",
+                    "intent": "add_comment",
+                },
+            )
+            return EngineOutcome(
+                "Что именно добавить комментарием? Напишите текст комментария."
+            )
+
+        from jarvis.repositories.tasks import TaskRepository
+
+        candidates = await TaskRepository(self._session).find_candidates(target or None)
+        if not candidates:
+            return EngineOutcome(
+                "Не нашёл подходящих задач. Создайте задачу или уточните название.",
+                menu=self._menu_flag(),
+            )
+        if len(candidates) == 1:
+            from jarvis.services.drafts import CommentDraft
+
+            draft = CommentDraft(task_id=candidates[0].id, content=content[:4000])
+            return await self._propose(telegram_user_id, PendingOpType.CREATE_COMMENT, draft)
+
+        await self._store.set(
+            telegram_user_id,
+            Flow.CHOOSE_TASK_FOR_COMMENT,
+            data={"content": content[:4000]},
+        )
+        return EngineOutcome(
+            "К какой задаче добавить комментарий?",
+            task_choices=candidates,
+        )
+
+    async def choose_task_for_comment(
+        self, telegram_user_id: int, task_id: str
+    ) -> EngineOutcome:
+        """Пользователь выбрал задачу из вариантов (кнопка)."""
+        state = await self._store.get_active(telegram_user_id)
+        if state is None or state.flow != Flow.CHOOSE_TASK_FOR_COMMENT:
+            return EngineOutcome("Выбор устарел — повторите запрос.", menu=self._menu_flag())
+        content = str(state.data.get("content", "")).strip()
+        await self._store.clear(telegram_user_id)
+        if not content:
+            return EngineOutcome("Текст комментария потерялся — повторите запрос.")
+        from jarvis.services.drafts import CommentDraft
+
+        draft = CommentDraft(task_id=task_id, content=content)
+        return await self._propose(telegram_user_id, PendingOpType.CREATE_COMMENT, draft)
 
     async def _propose_knowledge(
         self,
@@ -278,11 +402,23 @@ class ConversationEngine:
         hints = {hint.lower() for hint in interpretation.sensitivity_hints}
 
         if "secret" in hints or self._looks_like_secret(entities):
+            await self._store.set(
+                telegram_user_id,
+                Flow.FORCE_SAVE_PENDING,
+                data={
+                    "text": text,
+                    "project": str(entities.get("project") or "").strip() or None,
+                },
+            )
             return EngineOutcome(
-                "Похоже, в этом сообщении секрет (пароль, токен или ключ). "
-                "Я не сохраняю секреты в обычные заметки — используйте команду /secret. "
-                "Если секрета здесь нет, переформулируйте без него.",
-                menu=self._menu_flag(),
+                "⚠️ Похоже, в сообщении есть секрет (пароль, токен или ключ).\n\n"
+                "• Надёжный вариант — отправить значение через /secret: оно "
+                "зашифруется отдельным ключом и не попадёт в AI и MCP.\n"
+                "• Либо нажмите кнопку ниже — сохраню заметкой с уровнем "
+                "«чувствительная»: вы сможете её искать сами, MCP её не увидит.\n\n"
+                "<i>В заметке текст хранится как есть — проверьте, что это ваш "
+                "личный чат и в нём нет лишнего.</i>",
+                force_save=True,
             )
 
         content = str(entities.get("content") or text).strip()
@@ -296,7 +432,7 @@ class ConversationEngine:
         )
         sensitivity = Sensitivity.SENSITIVE if "sensitive" in hints else Sensitivity.NORMAL
         category = await self._catalog.resolve_name(entities.get("category"))
-        project = await self._resolve_project(entities.get("project"))
+        project_name = str(entities.get("project") or "").strip() or None
 
         draft = KnowledgeDraft(
             type=knowledge_type,
@@ -306,15 +442,68 @@ class ConversationEngine:
             source_type=source,
             original_text=text,
             category_id=category.id if category else None,
-            project_id=project.id if project else None,
+            project_name=project_name,
             sensitivity=sensitivity,
         )
         return await self._propose(telegram_user_id, PendingOpType.CREATE_KNOWLEDGE, draft)
 
-    async def _resolve_project(self, name):
-        if not name:
-            return None
-        return await self._projects.find_by_name(str(name))
+    async def _show_task_list(self, view: str) -> EngineOutcome:
+        """Список задач по динамической группе («какие у меня задачи на неделю»)."""
+        if view not in TASK_VIEWS:
+            view = "week"
+        tasks = await TaskService(self._session).list_view(
+            view,
+            now=datetime.now(UTC),
+            tz=self._settings.tz,
+            limit=TASK_LIST_LIMIT,
+        )
+        title = TASK_VIEW_LABELS.get(view, "Задачи")
+        if not tasks:
+            return EngineOutcome(f"📋 {title}: пусто.", menu=self._menu_flag())
+        lines = [f"📋 <b>{title}</b>", ""]
+        for index, task in enumerate(tasks, start=1):
+            suffix = ""
+            if task.due_at is not None:
+                suffix = f" — до {fmt_dt_local(task.due_at, self._settings.tz)}"
+            lines.append(f"{index}. {html_escape(task.title)}{suffix}")
+        lines.append("")
+        lines.append(
+            "<i>Откройте карточку задачи в /tasks, чтобы изменить её "
+            "или добавить комментарий.</i>"
+        )
+        return EngineOutcome("\n".join(lines))
+
+    async def _show_comments(self, interpretation: Interpretation) -> EngineOutcome:
+        """Комментарии к задаче («какие комментарии у меня к задаче X»)."""
+        target = str(interpretation.entities.get("target_task") or "").strip()
+        candidates = await TaskRepository(self._session).find_candidates(target or None)
+        if not candidates:
+            return EngineOutcome(
+                "Не нашёл подходящих задач. Уточните название.", menu=self._menu_flag()
+            )
+        if len(candidates) == 1:
+            return await self._render_comments(candidates[0].id)
+        return EngineOutcome(
+            "К какой задаче показать комментарии?",
+            task_choices=candidates,
+            task_choices_action="comments",
+        )
+
+    async def _render_comments(self, task_id) -> EngineOutcome:
+        task = await TaskRepository(self._session).get(task_id)
+        if task is None:
+            return EngineOutcome("Задача не найдена.", menu=self._menu_flag())
+        comments = await TaskCommentRepository(self._session).list_for_task(task_id)
+        if not comments:
+            return EngineOutcome(
+                f"💬 У задачи «{html_escape(task.title)}» комментариев пока нет.\n\n"
+                "Откройте карточку задачи в /tasks и нажмите «💬 Комментарии», чтобы добавить."
+            )
+        lines = [f"💬 <b>Комментарии</b> — {html_escape(task.title)}", ""]
+        for index, comment in enumerate(comments, start=1):
+            stamp = fmt_dt_local(comment.created_at, self._settings.tz)
+            lines.append(f"<b>{index}.</b> {html_escape(comment.content)}\n<i>{stamp}</i>")
+        return EngineOutcome("\n".join(lines))
 
     async def _propose(
         self,

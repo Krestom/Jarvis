@@ -143,6 +143,7 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 | `projects` | Проекты | `name` (unique), `status`, `category_id`, `meta` |
 | `knowledge_items` | Заметки/знания | `type`, `title`, `summary`, `content`, `source_type`, `original_text`, `sensitivity`, `status`, `search_vector` (GIN, russian) |
 | `tasks` | Задачи | `title`, `description`, `status`, `priority`, `bucket`, `due_at`, `completed_at`, `search_vector` (GIN, russian) |
+| `task_comments` | Комментарии к задачам | `task_id` (FK, CASCADE), `content` |
 | `documents` | Метаданные документов (содержимое — только на диске, зашифровано) | `title`, `document_type`, `sensitivity`, `status` (pending/active), `storage_key` (unique), `original_filename`, `mime_type`, `size_bytes`, `sha256`, `encryption_version` |
 | `secrets` | Секреты (значение зашифровано) | `name` (unique), `secret_type`, `encrypted_value` (blob), `key_version`, `project_id`, `category_id` |
 | `entity_links` | Полиморфные связи сущностей | `from_type/from_id`, `to_type/to_id`, `relation`, уникальность пары |

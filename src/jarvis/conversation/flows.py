@@ -15,3 +15,7 @@ class Flow(StrEnum):
     EDIT_CATEGORY = "edit_category"
     CREATE_PROJECT = "create_project"
     EDIT_TASK_DUE = "edit_task_due"
+    AWAIT_COMMENT = "await_comment"
+    EDIT_COMMENT = "edit_comment"
+    CHOOSE_TASK_FOR_COMMENT = "choose_task_for_comment"
+    FORCE_SAVE_PENDING = "force_save_pending"

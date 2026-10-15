@@ -178,6 +178,56 @@ async def menu_project_new(
     await callback.message.answer("Как назвать проект?")
 
 
+async def menu_force_save(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+) -> None:
+    """Сознательное сохранение сообщения с секретом как заметки."""
+    from jarvis.bot.handlers.render import propose_and_send
+    from jarvis.conversation.heuristics import first_line
+    from jarvis.domain.enums import (
+        KnowledgeSource,
+        KnowledgeType,
+        PendingOpType,
+        Sensitivity,
+    )
+    from jarvis.services.drafts import KnowledgeDraft
+
+    store = ConversationStore(ConversationRepository(session), settings)
+    state = await store.get_active(callback.from_user.id)
+    if (
+        state is None
+        or state.flow != Flow.FORCE_SAVE_PENDING
+        or not state.data.get("text")
+    ):
+        await callback.answer("Нечего сохранять — напишите сообщение заново.", show_alert=True)
+        return
+    text = str(state.data["text"])
+    await store.clear(callback.from_user.id)
+    await callback.answer()
+
+    draft = KnowledgeDraft(
+        type=KnowledgeType.NOTE,
+        title=first_line(text) or "Заметка",
+        content=text,
+        source_type=KnowledgeSource.TEXT,
+        original_text=text,
+        project_name=str(state.data.get("project") or "").strip() or None,
+        sensitivity=Sensitivity.SENSITIVE,
+    )
+    await propose_and_send(
+        callback.message,
+        session,
+        settings,
+        callback.from_user.id,
+        PendingOpType.CREATE_KNOWLEDGE,
+        draft.model_dump(mode="json"),
+    )
+    await callback.message.answer(
+        "<i>Сохраню с уровнем «чувствительная»: поиск и AI видят её только по "
+        "вашему запросу, MCP — не видит.</i>"
+    )
+
+
 def build_router() -> Router:
     router = Router(name="menu")
     router.callback_query.register(menu_main, MenuCBFilter("main"))
@@ -194,4 +244,5 @@ def build_router() -> Router:
     router.callback_query.register(menu_category_new, MenuCBFilter("category_new"))
     router.callback_query.register(menu_category_rename, MenuCBFilter("category_rename"))
     router.callback_query.register(menu_project_new, MenuCBFilter("project_new"))
+    router.callback_query.register(menu_force_save, MenuCBFilter("force_save"))
     return router

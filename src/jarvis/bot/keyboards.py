@@ -133,7 +133,7 @@ def task_list_keyboard(
     return builder.as_markup()
 
 
-def task_card_keyboard(task_id: str, status: str) -> InlineKeyboardMarkup:
+def task_card_keyboard(task_id: str, status: str, comments_count: int = 0) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if status == "done":
         builder.add(
@@ -159,6 +159,13 @@ def task_card_keyboard(task_id: str, status: str) -> InlineKeyboardMarkup:
                 text="🏁 Завершить", callback_data=TaskCB(action="done", task_id=task_id).pack()
             )
         )
+    comments_label = f"💬 Комментарии ({comments_count})" if comments_count else "💬 Комментарии"
+    builder.add(
+        InlineKeyboardButton(
+            text=comments_label,
+            callback_data=TaskCB(action="comments", task_id=task_id).pack(),
+        )
+    )
     builder.add(
         InlineKeyboardButton(
             text="🔗 Связи", callback_data=TaskCB(action="related", task_id=task_id).pack()
@@ -172,7 +179,63 @@ def task_card_keyboard(task_id: str, status: str) -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="📋 К спискам", callback_data=MenuCB(action="tasks").pack())
     )
-    builder.adjust(2, 2, 1, 1)
+    builder.adjust(2, 2, 1, 1, 1)
+    return builder.as_markup()
+
+
+def comments_keyboard(comments, task_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        InlineKeyboardButton(
+            text="➕ Добавить комментарий",
+            callback_data=TaskCB(action="comment_add", task_id=task_id).pack(),
+        )
+    )
+    for index, comment in enumerate(comments, start=1):
+        builder.add(
+            InlineKeyboardButton(
+                text=f"✏️ Изменить {index}",
+                callback_data=TaskCB(
+                    action="comment_edit", task_id=task_id, value=uuid_hex(comment.id)
+                ).pack(),
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="⬅️ К задаче", callback_data=TaskCB(action="view", task_id=task_id).pack()
+        )
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def comment_target_keyboard(tasks, action: str = "comment_choose") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for task in tasks:
+        builder.add(
+            InlineKeyboardButton(
+                text=task.title[:40],
+                callback_data=TaskCB(action=action, task_id=uuid_hex(task.id)).pack(),
+            )
+        )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def force_save_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        InlineKeyboardButton(
+            text="⚠️ Всё равно сохранить как заметку",
+            callback_data=MenuCB(action="force_save").pack(),
+        )
+    )
+    builder.add(
+        InlineKeyboardButton(
+            text="🏠 В меню", callback_data=MenuCB(action="main").pack()
+        )
+    )
+    builder.adjust(1)
     return builder.as_markup()
 
 

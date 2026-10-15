@@ -8,7 +8,11 @@ from pydantic import BaseModel, Field
 
 Intent = Literal[
     "create_task",
+    "add_comment",
+    "list_comments",
+    "list_tasks",
     "create_knowledge",
+    "create_project",
     "search",
     "smalltalk",
     "clarify",
