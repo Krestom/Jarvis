@@ -91,7 +91,7 @@ src/jarvis/
 Требования: Docker + Docker Compose, сервер или локальная машина.
 
 ```sh
-git clone <repo> && cd Jarvis
+git clone https://github.com/Krestom/Jarvis.git && cd Jarvis
 cp .env.example .env
 
 # 1. Ключи шифрования (значения вставить в .env, не коммитить)

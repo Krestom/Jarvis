@@ -58,11 +58,13 @@ sudo usermod -aG docker "$USER"   # затем перелогиниться
 
 ## 2. Подготовка
 
-1. Клонировать репозиторий и перейти в него:
+1. Клонировать репозиторий и перейти в него (репозиторий публичный —
+   авторизация не нужна; для деплоя на сервер достаточно анонимного HTTPS):
 
    ```sh
-   git clone <URL_РЕПОЗИТОРИЯ> jarvis
-   cd jarvis
+   sudo mkdir -p /opt/jarvis && sudo chown "$USER" /opt/jarvis
+   git clone https://github.com/Krestom/Jarvis.git /opt/jarvis
+   cd /opt/jarvis
    ```
 
 2. Создать `.env` из шаблона:
