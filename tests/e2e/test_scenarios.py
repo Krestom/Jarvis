@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from aiogram.types import InlineKeyboardMarkup
+from aiogram import Router
+from aiogram.types import InlineKeyboardMarkup, Message
 from sqlalchemy import func, select
 
 from jarvis.ai.fake import FakeProvider
@@ -13,8 +14,14 @@ from jarvis.ai.schemas import Interpretation
 from jarvis.bot.app import create_dispatcher
 from jarvis.db.models import KnowledgeItem, Task
 from jarvis.documents.storage import EncryptedFileStorage
-from jarvis.domain.enums import DocumentStatus, TaskBucket
+from jarvis.domain.enums import (
+    DocumentStatus,
+    ImprovementCategory,
+    ImprovementSource,
+    TaskBucket,
+)
 from jarvis.repositories.documents import DocumentRepository
+from jarvis.repositories.improvements import ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.secrets import SecretRepository
 from jarvis.repositories.tasks import TaskRepository
@@ -505,3 +512,74 @@ async def test_scenario_credentials_into_project(test_settings, session_factory,
     assert len(items) == 1
     assert items[0].sensitivity == Sensitivity.SENSITIVE
     assert items[0].project_id == project.id
+
+
+# 15. Жалоба на ассистента: достоверная гипотеза — в backlog, слабая — отброшена.
+async def test_scenario_improvement_hypothesis_recorded(test_settings, session_factory, session):
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="smalltalk",
+            reply="Понял, записал в улучшения.",
+            confidence=0.6,
+            improvement_hypothesis={
+                "category": "missing_capability",
+                "title": "Нет напоминаний по срокам",
+                "summary": "Пользователь ожидает напоминаний о дедлайнах",
+                "confidence": 0.9,
+                "evidence": "ты не напоминаешь мне про дедлайны",
+            },
+        )
+    )
+    ai.queue(
+        Interpretation(
+            intent="smalltalk",
+            reply="Хорошо.",
+            improvement_hypothesis={
+                "category": "ux_friction",
+                "title": "Слишком много подтверждений",
+                "summary": "Возможно, подтверждения утомляют",
+                "confidence": 0.2,
+            },
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    await harness.send_text(DEFAULT_USER_ID, "Ты не напоминаешь мне про дедлайны")
+    await harness.send_text(DEFAULT_USER_ID, "Может, и ничего, не знаю")
+    await session.commit()
+
+    items = await ImprovementRepository(session).list_items()
+    assert len(items) == 1
+    assert items[0].source == ImprovementSource.LLM_HYPOTHESIS
+    assert items[0].category == ImprovementCategory.MISSING_CAPABILITY
+    assert items[0].confidence == 0.9
+    assert items[0].occurrence_count == 1
+
+
+# 16. Технический сбой обработки апдейта автоматически попадает в backlog.
+async def test_scenario_technical_error_recorded(test_settings, session_factory, session):
+    harness = await make_harness(test_settings, session_factory)
+
+    crash_router = Router()
+
+    @crash_router.message(lambda message: (message.text or "").strip() == "/crash-test")
+    async def crash(message: Message) -> None:
+        raise RuntimeError("тестовый сбой e2e")
+
+    harness.dispatcher.sub_routers.insert(0, crash_router)
+
+    await harness.send_text(DEFAULT_USER_ID, "/crash-test")
+    await session.commit()
+
+    items = await ImprovementRepository(session).list_items()
+    assert len(items) == 1
+    item = items[0]
+    assert item.source == ImprovementSource.TECHNICAL_EVENT
+    assert item.category == ImprovementCategory.FAILURE
+    assert item.component == "telegram_bot"
+    assert "RuntimeError" in item.title
+    assert item.diagnostic_context["update_type"] == "message"
+    assert "тестовый сбой e2e" in item.summary
+    assert item.diagnostic_context["traceback"]
+    assert item.correlation_id == item.diagnostic_context["correlation_id"]

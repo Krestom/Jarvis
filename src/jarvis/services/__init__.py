@@ -1,6 +1,7 @@
 from jarvis.services.catalog import CatalogService
 from jarvis.services.confirmation import ConfirmationService, ConfirmResult
 from jarvis.services.errors import NotFoundError, OperationError
+from jarvis.services.improvements import ImprovementService
 from jarvis.services.knowledge import KnowledgeService, allowed_sensitivities
 from jarvis.services.operations import AppliedOperation, apply_operation
 from jarvis.services.search import SearchHit, SearchService
@@ -11,6 +12,7 @@ __all__ = [
     "CatalogService",
     "ConfirmResult",
     "ConfirmationService",
+    "ImprovementService",
     "KnowledgeService",
     "NotFoundError",
     "OperationError",

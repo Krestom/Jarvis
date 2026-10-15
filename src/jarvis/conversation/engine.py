@@ -33,6 +33,7 @@ from jarvis.domain.enums import (
     TaskBucket,
     TaskPriority,
 )
+from jarvis.logging_setup import get_correlation_id
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.projects import ProjectRepository
@@ -40,6 +41,7 @@ from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.catalog import CatalogService
 from jarvis.services.confirmation import ConfirmationService
 from jarvis.services.drafts import KnowledgeDraft, TaskDraft
+from jarvis.services.improvements import ImprovementService
 from jarvis.services.search import SearchHit, SearchService
 from jarvis.services.tasks import TASK_VIEWS, TaskService
 
@@ -87,6 +89,7 @@ class ConversationEngine:
         self._catalog = CatalogService(session)
         self._projects = ProjectRepository(session)
         self._search = SearchService(session)
+        self._improvements = ImprovementService(session, settings)
 
     # --- Публичные точки входа ---
 
@@ -202,6 +205,7 @@ class ConversationEngine:
                 menu=self._menu_flag(),
             )
 
+        await self._capture_hypothesis(interpretation)
         return await self._route(telegram_user_id, text, interpretation, context, source)
 
     async def search_page(self, telegram_user_id: int, page: int) -> EngineOutcome:
@@ -527,6 +531,20 @@ class ConversationEngine:
         )
         return EngineOutcome(preview, pending_op_id=operation_id)
 
+    # --- Improvement backlog ---
+
+    async def _capture_hypothesis(self, interpretation: Interpretation) -> None:
+        """Гипотеза LLM о проблеме Jarvis: в backlog, но не роняем диалог."""
+        if interpretation.improvement_hypothesis is None:
+            return
+        try:
+            await self._improvements.record_hypothesis(
+                interpretation.improvement_hypothesis,
+                correlation_id=get_correlation_id(),
+            )
+        except Exception:  # noqa: BLE001 - backlog не должен мешать диалогу
+            log.exception("failed to record improvement hypothesis")
+
     # --- Уточнения и редактирование черновика ---
 
     async def _ask_clarify(
@@ -561,6 +579,7 @@ class ConversationEngine:
             log.exception("ai provider failed during clarify")
             return EngineOutcome("AI-сервис временно недоступен. Попробуйте позже.")
 
+        await self._capture_hypothesis(interpretation)
         if interpretation.intent in _TASK_INTENTS or interpretation.intent in _KNOWLEDGE_INTENTS:
             await self._store.clear(telegram_user_id)
             return await self._route(telegram_user_id, combined, interpretation, context)

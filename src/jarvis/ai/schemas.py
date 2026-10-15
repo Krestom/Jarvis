@@ -21,6 +21,16 @@ Intent = Literal[
 ]
 
 
+class ImprovementHypothesis(BaseModel):
+    """Гипотеза о проблеме или упущенной возможности Jarvis из реплики пользователя."""
+
+    category: Literal["failure", "missing_capability", "ux_friction", "improvement_idea"]
+    title: str = Field(min_length=3, max_length=300)
+    summary: str = Field(min_length=3, max_length=2000)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: str | None = None
+
+
 class Interpretation(BaseModel):
     """Результат разбора пользовательского сообщения.
 
@@ -35,3 +45,4 @@ class Interpretation(BaseModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     sensitivity_hints: list[str] = Field(default_factory=list)
     reply: str | None = None
+    improvement_hypothesis: ImprovementHypothesis | None = None

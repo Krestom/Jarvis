@@ -98,11 +98,30 @@
 - Тесты: 146 passed, ruff чист, всё запушено в `main`.
 - Бот остановлен по просьбе пользователя (`jarvis.main` не запущен); PostgreSQL
   в Docker работает (порт 127.0.0.1:5433).
-- **Начатый P1 (уже в коммите, но без миграции)**: в `db/models.py` добавлены
-  `ImprovementItem` и `ImprovementEvent`, в `domain/enums.py` —
-  `ImprovementCategory`, `ImprovementSource`, `ImprovementStatus`.
-  Осталось: репозиторий, сервис с порогом достоверности, `dp.errors`-обработчик,
-  Alembic-миграция, тесты. Затем P2 (`/diagnostics`, `/export_issues`) и далее по плану.
 - Живой контур: реальные ключи в `.env` (gitignored); AI проверен живьём;
   MCP контейнер поднят через compose; на VPS ещё не разворачивалось.
+
+## 7. Журнал выполнения Stage 2
+
+### P1 — Improvement Backlog: выполнен (2026-10-15)
+
+- Модели `ImprovementItem` + `ImprovementEvent` (`db/models.py`), enum'ы
+  (`domain/enums.py`), миграция `19d82c1a6e02` (применена к локальной БД).
+- `repositories/improvements.py`: создание, поиск по сигнатуре (дедуп открытых),
+  `register_occurrence` (событие + occurrence_count), фильтры/пагинация,
+  статусы, counts, hard delete, merge (перенос событий, `merged_from`,
+  архивирование источника с `meta.merged_into`).
+- `services/improvements.py`: `record_failure` (redacted diagnostic_context,
+  обрезка по `IMPROVEMENT_CONTEXT_MAX_CHARS`), `record_hypothesis` (порог
+  `IMPROVEMENT_HYPOTHESIS_MIN_CONFIDENCE`, по умолчанию 0.75), `merge`.
+- LLM: `ImprovementHypothesis` в `ai/schemas.py`, правило в `ai/prompts.py`;
+  хук `ConversationEngine._capture_hypothesis` после interpret (и в clarify),
+  ошибки записи не роняют диалог.
+- Бот: `dp.errors` (`bot/app.py`) пишет failure-запись с correlation_id,
+  traceback (redacted), update_type/update_id — без тела переписки.
+- Тесты: +10 (integration: дедуп/порог/redaction/merge/статусы; unit: схема;
+  e2e: гипотеза через fake AI, сбой через dp.errors). Всего 156 passed.
+- События получают `occurred_at` из Python (в одной транзакции `now()` БД
+  одинаков, иначе теряется порядок).
+
 

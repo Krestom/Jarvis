@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
+import logging
+import traceback
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, ErrorEvent
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis.ai import AIProvider
 from jarvis.bot.handlers import build_routers
 from jarvis.bot.middlewares import register_middlewares
 from jarvis.config.settings import Settings
+from jarvis.db.session import session_scope
+from jarvis.logging_setup import get_correlation_id
 from jarvis.security.auth import Authorizer
+from jarvis.services.improvements import ImprovementService
+
+log = logging.getLogger(__name__)
 
 BOT_COMMANDS = [
     BotCommand(command="start", description="Главное меню"),
@@ -53,10 +61,46 @@ def create_dispatcher(
 
     authorizer = Authorizer(settings.telegram_allowed_user_ids)
     register_middlewares(dispatcher, session_factory, authorizer)
+    _register_error_handler(dispatcher, settings, session_factory)
 
     for router in build_routers():
         dispatcher.include_router(router)
     return dispatcher
+
+
+def _register_error_handler(
+    dispatcher: Dispatcher,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Технические сбои бота автоматически попадают в improvement backlog."""
+
+    async def on_error(event: ErrorEvent) -> bool:
+        try:
+            update = event.update
+            error = event.exception
+            error_type = type(error).__name__
+            message = str(error).strip() or error_type
+            async with session_scope(session_factory) as session:
+                await ImprovementService(session, settings).record_failure(
+                    title=f"{error_type}: {message}",
+                    summary=message,
+                    component="telegram_bot",
+                    correlation_id=get_correlation_id(),
+                    error_type=error_type,
+                    traceback_text="".join(
+                        traceback.format_exception(type(error), error, error.__traceback__)
+                    ),
+                    context={
+                        "update_type": getattr(update, "event_type", None),
+                        "update_id": getattr(update, "update_id", None),
+                    },
+                )
+        except Exception:  # noqa: BLE001 - обработчик ошибок не должен падать
+            log.exception("failed to record error to improvement backlog")
+        return True
+
+    dispatcher.errors.register(on_error)
 
 
 async def setup_bot_commands(bot: Bot) -> None:
