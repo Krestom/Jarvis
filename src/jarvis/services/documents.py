@@ -24,6 +24,9 @@ ALLOWED_DOCUMENT_MIME_PREFIXES = (
     "application/msword",
     "application/vnd.openxmlformats-officedocument",
     "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+    "text/x-web-markdown",
     "application/octet-stream",
 )
 

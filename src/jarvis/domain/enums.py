@@ -152,6 +152,7 @@ class PendingOpType(StrEnum):
     CREATE_CATEGORY = "create_category"
     RENAME_CATEGORY = "rename_category"
     SAVE_DOCUMENT = "save_document"
+    UPDATE_DOCUMENT = "update_document"
     DELETE_DOCUMENT = "delete_document"
     CREATE_SECRET = "create_secret"
     UPDATE_SECRET = "update_secret"

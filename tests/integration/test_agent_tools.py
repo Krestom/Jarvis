@@ -56,6 +56,55 @@ async def test_list_tasks_returns_real_items_and_candidates(session, test_settin
     assert {candidate.title for candidate in registry.surfaced} == titles
 
 
+async def test_list_tasks_on_date_and_category_and_create_category(session, test_settings):
+    from datetime import UTC, datetime, timedelta
+
+    from jarvis.repositories.categories import CategoryRepository
+
+    category = await CategoryRepository(session).create("Рабочие")
+    due = datetime.now(UTC) + timedelta(days=2)
+    await TaskService(session).create_from_draft(TaskDraft(title="Визит", due_at=due))
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="Отчёт", category_id=category.id)
+    )
+    registry = make_registry(session, test_settings)
+
+    by_date = await registry.call("list_tasks", {"on_date": due.date().isoformat()})
+    assert by_date.ok is True
+    assert [item["title"] for item in by_date.data["items"]] == ["Визит"]
+
+    by_category = await registry.call("list_tasks", {"category": "рабочие"})
+    assert by_category.ok is True
+    assert by_category.data["category"] == "Рабочие"
+    assert [item["title"] for item in by_category.data["items"]] == ["Отчёт"]
+
+    missing = await registry.call("list_tasks", {"category": "Нет такой"})
+    assert missing.ok is False
+    assert missing.error_kind == "not_found"
+
+    created = await registry.call("create_category", {"name": "Дом"})
+    assert created.ok is True
+    again = await registry.call("create_category", {"name": "дом"})
+    assert again.ok is True
+    assert again.data["category_id"] == created.data["category_id"]
+
+
+async def test_create_task_with_category(session, test_settings):
+    from jarvis.repositories.categories import CategoryRepository
+
+    category = await CategoryRepository(session).create("Рабочие")
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call("create_task", {"title": "Согласовать", "category": "Рабочие"})
+    assert result.ok is True
+    task = await TaskRepository(session).get(uuid.UUID(result.data["task"]["id"]))
+    assert task.category_id == category.id
+
+    missing = await registry.call("create_task", {"title": "X", "category": "Нет"})
+    assert missing.ok is False
+    assert missing.error_kind == "not_found"
+
+
 async def test_validation_not_found_and_unknown_tool_errors(session, test_settings):
     registry = make_registry(session, test_settings)
 

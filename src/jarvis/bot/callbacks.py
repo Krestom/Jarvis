@@ -13,8 +13,9 @@ class MenuCB(CallbackData, prefix="mn"):
 
 
 class TaskListCB(CallbackData, prefix="tl"):
-    view: str  # today | week | long_term | someday | no_group | inbox | done
+    view: str  # today | week | long_term | someday | no_group | inbox | done | category
     page: int = 0
+    value: str = ""  # id категории, когда view="category"
 
 
 class TaskCB(CallbackData, prefix="tsk"):
@@ -34,11 +35,13 @@ class KbCB(CallbackData, prefix="kb"):
 
 class DocListCB(CallbackData, prefix="dl"):
     page: int = 0
+    category: str = ""  # uuid.hex категории; "*" — показать список категорий
 
 
 class DocCB(CallbackData, prefix="dc"):
-    action: str  # view | download | delete | category | related
+    action: str  # view | download | delete | category | category_set | related
     doc_id: str = ""
+    value: str = ""  # категория для category_set (uuid.hex или none)
 
 
 class ConfirmCB(CallbackData, prefix="op"):

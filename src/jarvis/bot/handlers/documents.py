@@ -10,18 +10,27 @@ from aiogram import F, Router
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jarvis.bot.callbacks import DocCB, DocListCB
-from jarvis.bot.formatting import split_message
+from jarvis.bot.callbacks import DocCB, DocListCB, uuid_hex
+from jarvis.bot.formatting import esc, split_message
 from jarvis.bot.handlers.open_entity import parse_hex_uuid, render_document_card
 from jarvis.bot.handlers.render import propose_and_send
-from jarvis.bot.keyboards import PAGE_SIZE, documents_list_keyboard, main_menu
+from jarvis.bot.keyboards import (
+    PAGE_SIZE,
+    document_categories_keyboard,
+    document_category_set_keyboard,
+    documents_list_keyboard,
+    main_menu,
+)
 from jarvis.config.settings import Settings
+from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
 from jarvis.documents.storage import EncryptedFileStorage
 from jarvis.domain.enums import EntityType, PendingOpType
+from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.links import LinkRepository
+from jarvis.services.catalog import CatalogService
 from jarvis.services.documents import DocumentService
 from jarvis.services.errors import OperationError
 
@@ -35,21 +44,38 @@ def build_storage(settings: Settings) -> EncryptedFileStorage:
     return EncryptedFileStorage(settings.document_storage_path, settings.document_keyring())
 
 
-async def send_documents_list(message: Message, session: AsyncSession, *, page: int) -> None:
-    documents = await DocumentRepository(session).list_active(
-        limit=PAGE_SIZE, offset=page * PAGE_SIZE
+async def send_documents_list(
+    message: Message, session: AsyncSession, *, page: int, category: str = ""
+) -> None:
+    category_id = parse_hex_uuid(category)
+    category_obj = (
+        await CategoryRepository(session).get(category_id) if category_id else None
     )
+    if category and category_obj is None:
+        await message.answer("🗂 Категория не найдена — откройте список заново.")
+        return
+    documents = await DocumentRepository(session).list_active(
+        limit=PAGE_SIZE,
+        offset=page * PAGE_SIZE,
+        category_id=category_obj.id if category_obj else None,
+    )
+    title = f"🗂 <b>{esc(category_obj.name)}</b>" if category_obj else "📄 <b>Документы</b>"
     if not documents and page == 0:
+        if category_obj is not None:
+            await message.answer(f"{title}\n\nПусто.")
+            return
         await message.answer(
             "📄 Пока нет документов.\n\nОтправьте файл одним сообщением — "
             "я зашифрую его и предложу сохранить.",
             reply_markup=main_menu(),
         )
         return
-    lines = ["📄 <b>Документы</b>", ""]
+    lines = [title, ""]
     for index, document in enumerate(documents, start=1):
-        lines.append(f"{index}. {document.title}")
-    markup = documents_list_keyboard(documents, page, has_next=len(documents) >= PAGE_SIZE)
+        lines.append(f"{index}. {esc(document.title)}")
+    markup = documents_list_keyboard(
+        documents, page, has_next=len(documents) >= PAGE_SIZE, category=category
+    )
     for chunk in split_message("\n".join(lines)):
         await message.answer(chunk)
     await message.answer("Выберите документ:", reply_markup=markup)
@@ -59,7 +85,19 @@ async def documents_page(
     callback: CallbackQuery, callback_data: DocListCB, session: AsyncSession
 ) -> None:
     await callback.answer()
-    await send_documents_list(callback.message, session, page=callback_data.page)
+    if callback_data.category == "*":
+        categories = await CatalogService(session).list_categories()
+        await callback.message.answer(
+            "🗂 <b>Документы по категориям</b>",
+            reply_markup=document_categories_keyboard(categories),
+        )
+        return
+    await send_documents_list(
+        callback.message,
+        session,
+        page=callback_data.page,
+        category=callback_data.category,
+    )
 
 
 async def document_action(
@@ -68,6 +106,39 @@ async def document_action(
     session: AsyncSession,
     settings: Settings,
 ) -> None:
+    if callback_data.action == "category_set":
+        user_id = callback.from_user.id
+        store = ConversationStore(ConversationRepository(session), settings)
+        state = await store.get_active(user_id)
+        if state is None or state.flow != Flow.CHOOSE_DOC_CATEGORY:
+            await callback.answer("Выбор устарел — откройте карточку заново", show_alert=True)
+            return
+        document_id = parse_hex_uuid(str(state.data.get("document_id", "")))
+        await store.clear(user_id)
+        await callback.answer()
+        if document_id is None:
+            await callback.message.answer("Документ потерялся — откройте карточку заново.")
+            return
+        if callback_data.value == "none":
+            category_id = None
+        else:
+            category_id = parse_hex_uuid(callback_data.value)
+            if category_id is None:
+                await callback.message.answer("Категория не распознана.")
+                return
+        await propose_and_send(
+            callback.message,
+            session,
+            settings,
+            user_id,
+            PendingOpType.UPDATE_DOCUMENT,
+            {
+                "document_id": str(document_id),
+                "category_id": str(category_id) if category_id else None,
+            },
+        )
+        return
+
     document_id = parse_hex_uuid(callback_data.doc_id)
     if document_id is None:
         await callback.answer("Некорректный документ", show_alert=True)
@@ -82,6 +153,21 @@ async def document_action(
         for chunk in split_message(text):
             await callback.message.answer(chunk)
         await callback.message.answer("Действия:", reply_markup=markup)
+        return
+
+    if callback_data.action == "category":
+        store = ConversationStore(ConversationRepository(session), settings)
+        await store.set(
+            callback.from_user.id,
+            Flow.CHOOSE_DOC_CATEGORY,
+            data={"document_id": str(document_id)},
+        )
+        categories = await CatalogService(session).list_categories()
+        await callback.answer()
+        await callback.message.answer(
+            "Выберите категорию для документа:",
+            reply_markup=document_category_set_keyboard(categories, uuid_hex(document_id)),
+        )
         return
 
     if callback_data.action == "download":

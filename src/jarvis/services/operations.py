@@ -14,6 +14,7 @@ from jarvis.services.drafts import (
     CategoryDraft,
     CategoryRename,
     DocumentDraft,
+    DocumentUpdate,
     EntityRef,
     KnowledgeDraft,
     KnowledgeUpdate,
@@ -160,6 +161,21 @@ async def apply_operation(
         return AppliedOperation(
             EntityType.DOCUMENT, document.id, f"Документ сохранён: {draft.title}"
         )
+
+    if operation_type == PendingOpType.UPDATE_DOCUMENT:
+        from jarvis.repositories.documents import DocumentRepository
+
+        update = DocumentUpdate.model_validate(payload)
+        repo = DocumentRepository(session)
+        document = await repo.get(update.document_id)
+        if document is None:
+            raise NotFoundError("Документ не найден")
+        if update.category_id is not None and (
+            await CategoryRepository(session).get(update.category_id) is None
+        ):
+            raise OperationError("Категория не найдена")
+        await repo.update(document, category_id=update.category_id)
+        return AppliedOperation(EntityType.DOCUMENT, document.id, "Документ обновлён")
 
     if operation_type == PendingOpType.DELETE_DOCUMENT:
         from jarvis.documents.storage import EncryptedFileStorage

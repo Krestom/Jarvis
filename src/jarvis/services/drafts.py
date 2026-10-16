@@ -96,6 +96,13 @@ class DocumentDraft(BaseModel):
     sensitivity: Sensitivity = Sensitivity.SENSITIVE
 
 
+class DocumentUpdate(BaseModel):
+    """Изменение метаданных документа (сейчас — категория-папка)."""
+
+    document_id: uuid.UUID
+    category_id: uuid.UUID | None = None
+
+
 class SecretCreateDraft(BaseModel):
     """Значение секрета шифруется до сохранения в payload pending-операции."""
 

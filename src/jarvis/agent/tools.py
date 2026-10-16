@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -31,6 +31,7 @@ from jarvis.domain.enums import (
     TaskPriority,
     TaskStatus,
 )
+from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.improvements import ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
@@ -90,9 +91,21 @@ class ToolSpec:
 
 
 class ListTasksArgs(BaseModel):
-    view: str = Field(description="today|week|long_term|someday|no_group|inbox|done")
+    view: str = Field(
+        default="week", description="today|week|long_term|someday|no_group|inbox|done"
+    )
     limit: int = Field(default=10, ge=1, le=30)
     offset: int = Field(default=0, ge=0)
+    on_date: date | None = Field(
+        default=None,
+        description="День (YYYY-MM-DD): задачи с дедлайном на эту дату; "
+        "используй вместо view для вопросов «задачи на 19 октября»",
+    )
+    category: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Название категории-папки (например «Работа»); указывается вместо view",
+    )
 
     @field_validator("view")
     @classmethod
@@ -124,6 +137,13 @@ class CreateTaskArgs(BaseModel):
     bucket: TaskBucket | None = None
     priority: TaskPriority | None = None
     project: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(
+        default=None, max_length=120, description="Категория-папка (если названа пользователем)"
+    )
+
+
+class CreateCategoryArgs(BaseModel):
+    name: str = Field(min_length=1, max_length=120, description="Название категории-папки")
 
 
 class UpdateTaskArgs(BaseModel):
@@ -206,7 +226,8 @@ _TOOLS: dict[str, ToolMeta] = {
     "list_tasks": ToolMeta(
         ListTasksArgs,
         "Список задач по динамическому представлению (today — включая просроченные, "
-        "week, long_term, someday, no_group, inbox, done). Данные из базы.",
+        "week, long_term, someday, no_group, inbox, done). Вместо view можно указать "
+        "on_date (задачи на конкретный день) или category (категория-папка). Данные из базы.",
         mutating=False,
         risk="low",
     ),
@@ -233,6 +254,13 @@ _TOOLS: dict[str, ToolMeta] = {
         CreateTaskArgs,
         "Создать задачу (обратимо). Вызывай только когда пользователь явно просит "
         "поставить задачу; срок — ISO 8601, если он назван.",
+        mutating=True,
+        risk="low",
+    ),
+    "create_category": ToolMeta(
+        CreateCategoryArgs,
+        "Создать категорию-папку для группировки задач (например «Рабочие», «Дом»). "
+        "Если такая категория уже есть — вернётся существующая. Обратимо.",
         mutating=True,
         risk="low",
     ),
@@ -378,6 +406,35 @@ class ToolRegistry:
 
     async def _list_tasks(self, args: ListTasksArgs) -> ToolResult:
         service = TaskService(self._session)
+        if args.on_date is not None:
+            tasks = await service.list_on_date(
+                args.on_date, tz=self._settings.tz, limit=args.limit, offset=args.offset
+            )
+            await self._surface_tasks(tasks)
+            return ToolResult(
+                ok=True,
+                data={
+                    "date": args.on_date.isoformat(),
+                    "items": await self._task_briefs(tasks),
+                    "offset": args.offset,
+                    "limit": args.limit,
+                },
+            )
+        if args.category:
+            category = await CategoryRepository(self._session).find_by_name(args.category)
+            if category is None:
+                return ToolResult.failure(
+                    "not_found",
+                    f"категория «{args.category}» не найдена; список категорий — в /settings",
+                )
+            tasks = await TaskRepository(self._session).list_by_category(
+                category.id, limit=args.limit, offset=args.offset
+            )
+            await self._surface_tasks(tasks)
+            return ToolResult(
+                ok=True,
+                data={"category": category.name, "items": await self._task_briefs(tasks)},
+            )
         now = datetime.now(self._settings.tz)
         tasks = await service.list_view(
             args.view,
@@ -607,12 +664,23 @@ class ToolRegistry:
         )
 
     async def _create_task(self, args: CreateTaskArgs) -> ToolResult:
+        category_id = None
+        if args.category:
+            category = await CategoryRepository(self._session).find_by_name(args.category)
+            if category is None:
+                return ToolResult.failure(
+                    "not_found",
+                    f"категория «{args.category}» не найдена (можно создать create_category)",
+                    mutating=True,
+                )
+            category_id = category.id
         draft = TaskDraft(
             title=args.title,
             description=args.description,
             due_at=args.due_at,
             bucket=args.bucket,
             project_name=args.project,
+            category_id=category_id,
             **({"priority": args.priority} if args.priority else {}),
         )
         task_id = await TaskService(self._session).create_from_draft(draft)
@@ -622,6 +690,27 @@ class ToolRegistry:
             ok=True,
             mutating=True,
             data={"task": (await self._task_briefs([task]))[0]},
+        )
+
+    async def _create_category(self, args: CreateCategoryArgs) -> ToolResult:
+        repo = CategoryRepository(self._session)
+        name = args.name.strip()[:120]
+        existing = await repo.find_by_name(name)
+        if existing is not None:
+            return ToolResult(
+                ok=True,
+                mutating=True,
+                data={
+                    "category_id": str(existing.id),
+                    "name": existing.name,
+                    "note": "категория уже существует",
+                },
+            )
+        category = await repo.create(name)
+        return ToolResult(
+            ok=True,
+            mutating=True,
+            data={"category_id": str(category.id), "name": category.name},
         )
 
     async def _update_task(self, args: UpdateTaskArgs) -> ToolResult:

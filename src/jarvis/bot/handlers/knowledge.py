@@ -78,6 +78,9 @@ async def knowledge_action(
         hits = await SearchService(session).search(item.title, limit=PAGE_SIZE)
         hits = [hit for hit in hits if hit.entity_id != item_id]
         await callback.answer()
+        if not hits:
+            await callback.message.answer("Похожих записей не нашлось.", reply_markup=main_menu())
+            return
         await send_search_results(
             callback.message,
             EngineOutcome("", search_hits=hits, search_query=item.title, search_page=0),

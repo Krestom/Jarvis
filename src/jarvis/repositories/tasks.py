@@ -135,6 +135,41 @@ class TaskRepository:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_due_between(
+        self, start: datetime, end: datetime, *, limit: int = 20, offset: int = 0
+    ) -> list[Task]:
+        """Задачи с дедлайном внутри интервала (для «задачи на <дата>»)."""
+        stmt = (
+            select(Task)
+            .where(*_active(), Task.due_at >= start, Task.due_at < end)
+            .order_by(Task.due_at.asc(), Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_due_before(self, moment: datetime, *, limit: int = 5) -> list[Task]:
+        """Незавершённые задачи с наступившим сроком (для напоминаний)."""
+        stmt = (
+            select(Task)
+            .where(*_active(), Task.due_at.is_not(None), Task.due_at <= moment)
+            .order_by(Task.due_at.asc())
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_by_category(
+        self, category_id: uuid.UUID, *, limit: int = 20, offset: int = 0
+    ) -> list[Task]:
+        stmt = (
+            select(Task)
+            .where(*_active(), Task.category_id == category_id)
+            .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def count_active(self) -> int:
         result = await self._session.execute(
             select(func.count()).select_from(Task).where(*_active())

@@ -18,6 +18,7 @@ from jarvis.bot.keyboards import (
     bucket_keyboard,
     comments_keyboard,
     main_menu,
+    task_categories_keyboard,
     task_list_keyboard,
 )
 from jarvis.config.settings import Settings
@@ -26,10 +27,12 @@ from jarvis.conversation.flows import Flow
 from jarvis.conversation.preview import fmt_dt_local
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import EntityType, PendingOpType, TaskBucket
+from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.links import LinkRepository
 from jarvis.repositories.tasks import TaskRepository
+from jarvis.services.catalog import CatalogService
 from jarvis.services.tasks import TaskService
 
 VIEW_TITLES = {
@@ -44,14 +47,29 @@ VIEW_TITLES = {
 
 
 async def build_task_list(
-    session: AsyncSession, settings: Settings, view: str, page: int
+    session: AsyncSession, settings: Settings, view: str, page: int, value: str = ""
 ) -> tuple[str, object]:
     service = TaskService(session)
     now = datetime.now(UTC)
-    tasks = await service.list_view(
-        view, now=now, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
-    )
-    title = VIEW_TITLES.get(view, "Задачи")
+    if view == "category":
+        category_id = parse_hex_uuid(value)
+        category = (
+            await CategoryRepository(session).get(category_id) if category_id else None
+        )
+        if category is None:
+            categories = await CatalogService(session).list_categories()
+            return "🗂 Категория не найдена — выберите заново.", task_categories_keyboard(
+                categories
+            )
+        tasks = await service.list_by_category(
+            category.id, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+        )
+        title = f"🗂 {esc(category.name)}"
+    else:
+        tasks = await service.list_view(
+            view, now=now, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+        )
+        title = VIEW_TITLES.get(view, "Задачи")
     if not tasks:
         text = f"{title}\n\nПусто."
     else:
@@ -59,7 +77,9 @@ async def build_task_list(
         for index, task in enumerate(tasks, start=1):
             lines.append(task_line(task, settings.tz, index=index, now=now))
         text = "\n".join(lines)
-    markup = task_list_keyboard(tasks, view, page, has_next=len(tasks) >= PAGE_SIZE)
+    markup = task_list_keyboard(
+        tasks, view, page, has_next=len(tasks) >= PAGE_SIZE, value=value
+    )
     return text, markup
 
 
@@ -75,7 +95,20 @@ async def send_task_list(
 async def task_list(
     callback: CallbackQuery, callback_data: TaskListCB, session: AsyncSession, settings: Settings
 ) -> None:
-    text, markup = await build_task_list(session, settings, callback_data.view, callback_data.page)
+    if callback_data.view == "category" and not callback_data.value:
+        categories = await CatalogService(session).list_categories()
+        await callback.answer()
+        try:
+            await callback.message.edit_text("🗂 <b>Задачи по категориям</b>")
+        except Exception:  # noqa: BLE001 - сообщение могло быть недоступно для правки
+            await callback.message.answer("🗂 <b>Задачи по категориям</b>")
+        await callback.message.answer(
+            "Выберите категорию:", reply_markup=task_categories_keyboard(categories)
+        )
+        return
+    text, markup = await build_task_list(
+        session, settings, callback_data.view, callback_data.page, callback_data.value
+    )
     await callback.answer()
     chunks = split_message(text)
     try:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -105,3 +105,16 @@ class TaskService:
 
     async def count_active(self) -> int:
         return await self._repo.count_active()
+
+    async def list_on_date(
+        self, day: date, *, tz: ZoneInfo, limit: int = 20, offset: int = 0
+    ) -> list:
+        """Задачи с дедлайном на конкретный день (в таймзоне пользователя)."""
+        start = datetime.combine(day, time.min, tz)
+        end = start + timedelta(days=1)
+        return await self._repo.list_due_between(start, end, limit=limit, offset=offset)
+
+    async def list_by_category(
+        self, category_id: uuid.UUID, *, limit: int = 20, offset: int = 0
+    ) -> list:
+        return await self._repo.list_by_category(category_id, limit=limit, offset=offset)

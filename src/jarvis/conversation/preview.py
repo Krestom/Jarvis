@@ -88,6 +88,7 @@ OPERATION_TITLES = {
     PendingOpType.CREATE_PROJECT: "Создать проект?",
     PendingOpType.RENAME_CATEGORY: "Переименовать категорию?",
     PendingOpType.SAVE_DOCUMENT: "Сохранить документ?",
+    PendingOpType.UPDATE_DOCUMENT: "Обновить документ?",
     PendingOpType.DELETE_DOCUMENT: "Удалить документ?",
     PendingOpType.CREATE_SECRET: "Сохранить секрет?",
     PendingOpType.UPDATE_SECRET: "Изменить секрет?",
@@ -238,6 +239,23 @@ async def render_preview(
         lines.append(
             _line("Чувствительность", SENSITIVITY_LABELS.get(Sensitivity(sensitivity)))
         )
+
+    elif operation_type == PendingOpType.UPDATE_DOCUMENT:
+        from jarvis.repositories.documents import DocumentRepository
+
+        document_id = payload.get("document_id")
+        document = None
+        try:
+            document = await DocumentRepository(session).get(uuid.UUID(str(document_id)))
+        except (ValueError, TypeError):
+            document = None
+        if document is None:
+            lines.append("Документ не найден.\n")
+        else:
+            lines.append(_line("Документ", document.title))
+            old = await _category_name(session, document.category_id)
+            new = await _category_name(session, payload.get("category_id"))
+            lines.append(_line("Категория", f"{old or 'нет'} → {new or 'нет'}"))
 
     elif operation_type in (
         PendingOpType.DELETE_TASK,

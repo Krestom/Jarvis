@@ -18,4 +18,5 @@ class Flow(StrEnum):
     AWAIT_COMMENT = "await_comment"
     EDIT_COMMENT = "edit_comment"
     CHOOSE_TASK_FOR_COMMENT = "choose_task_for_comment"
+    CHOOSE_DOC_CATEGORY = "choose_doc_category"
     FORCE_SAVE_PENDING = "force_save_pending"
