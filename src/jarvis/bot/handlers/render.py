@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import re
+
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message
 
 from jarvis.bot.formatting import esc, split_message
@@ -18,6 +22,26 @@ from jarvis.bot.keyboards import (
 from jarvis.conversation.engine import EngineOutcome
 
 EMPTY_SEARCH_TEXT = "Ничего не нашёл. Уточните запрос или сохраните это как заметку."
+
+log = logging.getLogger(__name__)
+
+_PARSE_ERROR_MARKER = "can't parse entities"
+_TAG_RE = re.compile(r"</?[a-zA-Z][^>]{0,80}>")
+
+
+async def answer_safe(message: Message, text: str, **kwargs) -> None:
+    """Отправить текст; при ошибке HTML-парсинга — повторить без разметки.
+
+    Динамический текст (ответы агента, фрагменты данных) может содержать «<»,
+    который Telegram отвергает как тег, — сообщение не должно теряться совсем.
+    """
+    try:
+        await message.answer(text, **kwargs)
+    except TelegramBadRequest as error:
+        if _PARSE_ERROR_MARKER not in str(error):
+            raise
+        log.warning("telegram rejected html in outgoing message, sending plain text")
+        await message.answer(_TAG_RE.sub("", text), parse_mode=None, **kwargs)
 
 
 async def propose_and_send(
@@ -59,7 +83,9 @@ async def send_outcome(message: Message, outcome: EngineOutcome) -> None:
 
     chunks = split_message(outcome.text or "…")
     for index, chunk in enumerate(chunks):
-        await message.answer(chunk, reply_markup=markup if index == len(chunks) - 1 else None)
+        await answer_safe(
+            message, chunk, reply_markup=markup if index == len(chunks) - 1 else None
+        )
 
     if outcome.task_choices:
         await message.answer(
@@ -83,7 +109,8 @@ async def send_search_results(message: Message, outcome: EngineOutcome) -> None:
         if outcome.search_page > 0:
             await message.answer("Больше результатов нет.", reply_markup=main_menu())
             return
-        await message.answer(
+        await answer_safe(
+            message,
             f"{EMPTY_SEARCH_TEXT}\n\n<i>Запрос: {esc(query)}</i>",
             reply_markup=main_menu(),
         )
@@ -102,5 +129,5 @@ async def send_search_results(message: Message, outcome: EngineOutcome) -> None:
         hits, query, outcome.search_page, has_next=len(hits) >= PAGE_SIZE
     )
     for chunk in split_message(text):
-        await message.answer(chunk)
+        await answer_safe(message, chunk)
     await message.answer("Выберите запись, чтобы открыть:", reply_markup=markup)

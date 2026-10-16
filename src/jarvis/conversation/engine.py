@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from html import escape as html_escape
 from typing import TYPE_CHECKING, Any
 
@@ -72,6 +73,10 @@ TASK_VIEW_LABELS = {
     "inbox": "Inbox",
     "done": "Выполненные",
 }
+
+# «Задачи на 19 октября»: глаголы-просьбы, для которых дата — фильтр списка,
+# а не срок создания задачи.
+_DATE_LIST_PREFIX = re.compile(r"(?i)^\s*(какие|что|выведи|покажи|дай|список|найди)\b")
 
 
 @dataclass
@@ -214,11 +219,11 @@ class ConversationEngine:
         # над поиском, эвристиками и fallback'ами (но не над пошаговыми
         # сценариями выше — их нельзя сбивать).
         if self._agent_enabled():
-            from jarvis.agent.routing import AGENT_FLOW, invokes_jarvis
+            from jarvis.agent.routing import AGENT_FLOW, invokes_jarvis, mentions_backlog
 
             if state is not None and state.flow == AGENT_FLOW:
                 return await self._run_agent(telegram_user_id, text)
-            if invokes_jarvis(text):
+            if invokes_jarvis(text) or mentions_backlog(text):
                 return await self._run_agent(telegram_user_id, text)
 
         # Поиск ждёт ввод только пока пользователь его не ввёл (step=asked).
@@ -230,6 +235,10 @@ class ConversationEngine:
             and state.step == "asked"
         ):
             return await self._do_search(telegram_user_id, text, page=0)
+
+        day = self._date_list_day(text)
+        if day is not None:
+            return await self._show_tasks_on_date(day)
 
         if looks_like_search(text):
             return await self._do_search(
@@ -513,9 +522,19 @@ class ConversationEngine:
             limit=TASK_LIST_LIMIT,
         )
         title = TASK_VIEW_LABELS.get(view, "Задачи")
+        return self._render_task_list(f"📋 <b>{title}</b>", tasks)
+
+    async def _show_tasks_on_date(self, day: date) -> EngineOutcome:
+        """Список задач с дедлайном на конкретный день («задачи на 19 октября»)."""
+        tasks = await TaskService(self._session).list_on_date(
+            day, tz=self._settings.tz, limit=TASK_LIST_LIMIT
+        )
+        return self._render_task_list(f"📋 <b>Задачи на {day.strftime('%d.%m.%Y')}</b>", tasks)
+
+    def _render_task_list(self, title: str, tasks) -> EngineOutcome:
         if not tasks:
-            return EngineOutcome(f"📋 {title}: пусто.", menu=self._menu_flag())
-        lines = [f"📋 <b>{title}</b>", ""]
+            return EngineOutcome(f"{title}\n\nПусто.", menu=self._menu_flag())
+        lines = [title, ""]
         for index, task in enumerate(tasks, start=1):
             suffix = ""
             if task.due_at is not None:
@@ -750,8 +769,13 @@ class ConversationEngine:
         elif op_kind == PendingOpType.CREATE_SECRET.value:
             draft["name"] = first_line(text, limit=200) or draft.get("name", "Секрет")
         else:
-            if not entities.get("title"):
-                draft["title"] = text.strip()[:300] or draft.get("title", "")
+            # «Изменить» может принести новое название: сначала берём то, что
+            # разобрал ИИ (раньше заголовок из ответа ИИ игнорировался), и только
+            # потом — текст целиком, как раньше.
+            if entities.get("title"):
+                draft["title"] = str(entities["title"])[:300]
+            elif text.strip():
+                draft["title"] = text.strip()[:300]
             if entities.get("due_at"):
                 draft["due_at"] = entities["due_at"]
             if entities.get("bucket"):
@@ -866,6 +890,15 @@ class ConversationEngine:
             "После настройки AI я буду распознавать задачи и категории.</i>"
         )
         return outcome
+
+    def _date_list_day(self, text: str) -> date | None:
+        """«Задачи на <дата>» — детерминированный список, без AI."""
+        if "задач" not in text.lower() or not _DATE_LIST_PREFIX.search(text):
+            return None
+        parsed, matched = parse_human_date(text, datetime.now(UTC), self._settings.tz)
+        if not matched or parsed is None:
+            return None
+        return parsed.date()
 
     @staticmethod
     def _parse_due_at(value: Any) -> datetime | None:

@@ -149,14 +149,19 @@ def tasks_menu_keyboard() -> InlineKeyboardMarkup:
     for view, label in labels:
         builder.add(InlineKeyboardButton(text=label, callback_data=TaskListCB(view=view).pack()))
     builder.add(
+        InlineKeyboardButton(
+            text="🗂 По категориям", callback_data=TaskListCB(view="category").pack()
+        )
+    )
+    builder.add(
         InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
     )
-    builder.adjust(2, 2, 2, 1, 1)
+    builder.adjust(2, 2, 2, 1, 1, 1)
     return builder.as_markup()
 
 
 def task_list_keyboard(
-    tasks, view: str, page: int, has_next: bool
+    tasks, view: str, page: int, has_next: bool, value: str = ""
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for index, task in enumerate(tasks, start=1):
@@ -170,13 +175,13 @@ def task_list_keyboard(
     if page > 0:
         nav.append(
             InlineKeyboardButton(
-                text="⬅️", callback_data=TaskListCB(view=view, page=page - 1).pack()
+                text="⬅️", callback_data=TaskListCB(view=view, page=page - 1, value=value).pack()
             )
         )
     if has_next:
         nav.append(
             InlineKeyboardButton(
-                text="➡️", callback_data=TaskListCB(view=view, page=page + 1).pack()
+                text="➡️", callback_data=TaskListCB(view=view, page=page + 1, value=value).pack()
             )
         )
     builder.adjust(1)
@@ -297,6 +302,23 @@ def force_save_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def task_categories_keyboard(categories) -> InlineKeyboardMarkup:
+    """Категории-папки задач: выбор для просмотра."""
+    builder = InlineKeyboardBuilder()
+    for category in categories:
+        builder.add(
+            InlineKeyboardButton(
+                text=f"🗂 {category.name[:40]}",
+                callback_data=TaskListCB(view="category", value=uuid_hex(category.id)).pack(),
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(text="📋 К спискам", callback_data=MenuCB(action="tasks").pack())
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def bucket_keyboard(task_id: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     options = [
@@ -378,7 +400,9 @@ def knowledge_card_keyboard(item_id: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def documents_list_keyboard(documents, page: int, has_next: bool) -> InlineKeyboardMarkup:
+def documents_list_keyboard(
+    documents, page: int, has_next: bool, category: str = ""
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for index, document in enumerate(documents, start=1):
         builder.add(
@@ -390,14 +414,68 @@ def documents_list_keyboard(documents, page: int, has_next: bool) -> InlineKeybo
     builder.adjust(1)
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=DocListCB(page=page - 1).pack()))
+        nav.append(
+            InlineKeyboardButton(
+                text="⬅️", callback_data=DocListCB(page=page - 1, category=category).pack()
+            )
+        )
     if has_next:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=DocListCB(page=page + 1).pack()))
+        nav.append(
+            InlineKeyboardButton(
+                text="➡️", callback_data=DocListCB(page=page + 1, category=category).pack()
+            )
+        )
     if nav:
         builder.row(*nav)
     builder.row(
-        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
+        InlineKeyboardButton(
+            text="🗂 По категориям", callback_data=DocListCB(category="*").pack()
+        ),
+        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack()),
     )
+    return builder.as_markup()
+
+
+def document_categories_keyboard(categories) -> InlineKeyboardMarkup:
+    """Категории-папки документов: выбор для просмотра."""
+    builder = InlineKeyboardBuilder()
+    for category in categories:
+        builder.add(
+            InlineKeyboardButton(
+                text=f"🗂 {category.name[:40]}",
+                callback_data=DocListCB(category=uuid_hex(category.id)).pack(),
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(text="📄 Все документы", callback_data=DocListCB().pack()),
+        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack()),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def document_category_set_keyboard(categories, doc_id: str) -> InlineKeyboardMarkup:
+    """Выбор категории для документа (id документа берётся из состояния диалога)."""
+    builder = InlineKeyboardBuilder()
+    for category in categories:
+        builder.add(
+            InlineKeyboardButton(
+                text=f"🗂 {category.name[:40]}",
+                callback_data=DocCB(action="category_set", value=uuid_hex(category.id)).pack(),
+            )
+        )
+    builder.add(
+        InlineKeyboardButton(
+            text="🚫 Без категории",
+            callback_data=DocCB(action="category_set", value="none").pack(),
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="⬅️ Назад", callback_data=DocCB(action="view", doc_id=doc_id).pack()
+        )
+    )
+    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -412,6 +490,11 @@ def document_card_keyboard(doc_id: str, *, can_download: bool) -> InlineKeyboard
         )
     builder.add(
         InlineKeyboardButton(
+            text="🗂 Категория", callback_data=DocCB(action="category", doc_id=doc_id).pack()
+        )
+    )
+    builder.add(
+        InlineKeyboardButton(
             text="🔗 Связи", callback_data=DocCB(action="related", doc_id=doc_id).pack()
         )
     )
@@ -423,7 +506,7 @@ def document_card_keyboard(doc_id: str, *, can_download: bool) -> InlineKeyboard
     builder.row(
         InlineKeyboardButton(text="📄 К списку", callback_data=MenuCB(action="documents").pack())
     )
-    builder.adjust(2, 1, 1)
+    builder.adjust(2, 1, 1, 1)
     return builder.as_markup()
 
 
@@ -609,7 +692,7 @@ def diagnostics_keyboard(status_counts, category_counts) -> InlineKeyboardMarkup
 def backlog_list_keyboard(items, kind: str, value: str, page: int, has_next: bool):
     builder = InlineKeyboardBuilder()
     # origin = «откуда пришли»; разделитель не ":", он занят aiogram'ом.
-    origin = f"{kind}|{value}"
+    origin = pack_origin(kind, value)
     for index, item in enumerate(items, start=1):
         builder.add(
             InlineKeyboardButton(
@@ -646,8 +729,35 @@ def backlog_list_keyboard(items, kind: str, value: str, page: int, has_next: boo
     return builder.as_markup()
 
 
+# Компактные коды origin: полные названия не помещаются в callback_data
+# (лимит Telegram — 64 байта; регрессия imp:delete_no из backlog).
+_ORIGIN_KINDS = {"open": "o", "all": "a", "status": "s", "category": "c"}
+_ORIGIN_VALUES = {
+    "new": "n",
+    "reviewed": "r",
+    "planned": "p",
+    "implemented": "i",
+    "wont_fix": "w",
+    "archived": "d",
+    "failure": "f",
+    "missing_capability": "m",
+    "ux_friction": "u",
+    "improvement_idea": "e",
+}
+_KIND_BY_CODE = {code: kind for kind, code in _ORIGIN_KINDS.items()}
+_VALUE_BY_CODE = {code: value for value, code in _ORIGIN_VALUES.items()}
+
+
+def pack_origin(kind: str, value: str) -> str:
+    """Упаковать «откуда пришли» для callback_data (коротко, ≤64 байт)."""
+    return f"{_ORIGIN_KINDS.get(kind, kind)}|{_ORIGIN_VALUES.get(value, value)}"
+
+
 def _parse_origin(origin: str) -> tuple[str, str]:
+    """Разобрать origin: новые коды (o/a/s/c) и legacy-формат «kind|value»."""
     kind, _, value = origin.partition("|")
+    if kind in _KIND_BY_CODE:
+        return _KIND_BY_CODE[kind], _VALUE_BY_CODE.get(value, value)
     return kind or "open", value
 
 

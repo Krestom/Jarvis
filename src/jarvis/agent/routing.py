@@ -16,12 +16,20 @@ from jarvis.config.settings import Settings
 # Границы не включают дефис и буквы/цифры: «jarvis-обёртка» не срабатывает.
 INVOCATION_PATTERN = re.compile(r"(?<![\w-])(jarvis|джарвис)(?![\w-])", re.IGNORECASE)
 
+# Упоминание бэклога/диагностики: такие сообщения всегда идут агенту
+# («покажи бэклог», «запиши в бэклог ...»), а не в задачи/заметки.
+BACKLOG_PATTERN = re.compile(r"(бэклог|backlog|диагностик)", re.IGNORECASE)
+
 # Flow персистентного контекста агента (выбранные сущности, кандидаты, last run).
 AGENT_FLOW = "agent_context"
 
 
 def invokes_jarvis(text: str) -> bool:
     return bool(INVOCATION_PATTERN.search(text or ""))
+
+
+def mentions_backlog(text: str) -> bool:
+    return bool(BACKLOG_PATTERN.search(text or ""))
 
 
 def detect_profile(text: str, settings: Settings) -> str:
@@ -59,4 +67,5 @@ __all__ = [
     "build_profile",
     "detect_profile",
     "invokes_jarvis",
+    "mentions_backlog",
 ]

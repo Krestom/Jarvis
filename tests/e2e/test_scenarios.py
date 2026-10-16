@@ -23,6 +23,7 @@ from jarvis.domain.enums import (
     ImprovementStatus,
     TaskBucket,
 )
+from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.improvements import ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
@@ -280,6 +281,43 @@ async def test_scenario_cancel_operation(test_settings, session_factory, session
 
     count = await session.scalar(select(func.count()).select_from(KnowledgeItem))
     assert count == 0
+
+
+# 5.1. «Изменить» на черновике задачи применяет новое название (регрессия).
+async def test_pending_task_rename_via_edit(test_settings, session_factory, session):
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="create_task",
+            entities={"title": "Старая формулировка"},
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "поставь задачу: старая формулировка")
+    preview = keyboard_messages(messages)[-1]
+    assert "Старая формулировка" in (preview.text or "")
+
+    await harness.click_button(DEFAULT_USER_ID, preview, "Изменить")
+    ai.queue(
+        Interpretation(
+            intent="create_task",
+            entities={"title": "Отчёт по УВ"},
+            confidence=0.9,
+        )
+    )
+    messages = await harness.send_text(DEFAULT_USER_ID, "Название должно быть «Отчёт по УВ»")
+    updated = keyboard_messages(messages)[-1]
+    assert "Отчёт по УВ" in (updated.text or "")
+    assert "Старая формулировка" not in (updated.text or "")
+
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    session.expire_all()
+
+    tasks = await TaskRepository(session).list_no_group()
+    assert [task.title for task in tasks] == ["Отчёт по УВ"]
 
 
 # 6. Неавторизованный пользователь не получает доступ.
@@ -736,3 +774,87 @@ async def test_scenario_typed_ui_quick_actions(test_settings, session_factory, s
     await harness.click_button(DEFAULT_USER_ID, reply_message, "Задачи на сегодня")
     list_view = harness.current(reply_message)
     assert "Позвонить в сервис" in (list_view.text or "")
+
+
+# 20. «Выведи задачи на <дата>» — детерминированный список по календарю.
+async def test_scenario_tasks_on_named_date(test_settings, session_factory, session):
+    tz = test_settings.tz
+    due = (datetime.now(tz) + timedelta(days=3)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+    await TaskService(session).create_from_draft(TaskDraft(title="Визит к врачу", due_at=due))
+    await TaskService(session).create_from_draft(TaskDraft(title="Другая задача"))
+    await session.commit()
+
+    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, f"Выведи мне задачи на {due.strftime('%d.%m.%Y')}"
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert f"Задачи на {due.strftime('%d.%m.%Y')}" in combined
+    assert "Визит к врачу" in combined
+    assert "Другая задача" not in combined
+
+
+# 21. Категории-папки задач: просмотр задач по категории.
+async def test_scenario_tasks_by_category(test_settings, session_factory, session):
+    category = await CategoryRepository(session).create("Рабочие")
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="Отчёт по УВ", category_id=category.id)
+    )
+    await session.commit()
+
+    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    menu_message = keyboard_messages(messages)[-1]
+
+    picked_category = await harness.click_button(
+        DEFAULT_USER_ID, menu_message, "По категориям"
+    )
+    categories_message = keyboard_messages(picked_category)[-1]
+    picked = await harness.click_button(DEFAULT_USER_ID, categories_message, "Рабочие")
+    assert picked  # прислано «Выберите задачу:»
+    assert "Отчёт по УВ" in (harness.current(categories_message).text or "")
+
+
+# 22. Категории документов: назначение из карточки и просмотр по категории.
+async def test_scenario_document_category_flow(test_settings, session_factory, session):
+    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+    messages = await harness.send_document(
+        DEFAULT_USER_ID, filename="passport.pdf", content=b"%PDF-1.4 data"
+    )
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    session.expire_all()
+
+    assert len(await DocumentRepository(session).list_active()) == 1
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "/documents")
+    list_message = keyboard_messages(messages)[-1]
+    card_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "1. passport")
+    actions_message = keyboard_messages(card_messages)[-1]
+
+    picker_messages = await harness.click_button(
+        DEFAULT_USER_ID, actions_message, "Категория"
+    )
+    picker_message = keyboard_messages(picker_messages)[-1]
+    proposal = await harness.click_button(DEFAULT_USER_ID, picker_message, "Работа")
+    assert any("Обновить документ?" in (m.text or "") for m in proposal)
+    await confirm_last(harness, DEFAULT_USER_ID, proposal)
+    await session.commit()
+    session.expire_all()
+
+    document = (await DocumentRepository(session).list_active())[0]
+    category = await CategoryRepository(session).find_by_name("Работа")
+    assert document.category_id == category.id
+
+    # Просмотр по категории показывает документ.
+    messages = await harness.send_text(DEFAULT_USER_ID, "/documents")
+    list_message = keyboard_messages(messages)[-1]
+    category_list = await harness.click_button(
+        DEFAULT_USER_ID, list_message, "По категориям"
+    )
+    category_menu = keyboard_messages(category_list)[-1]
+    filtered = await harness.click_button(DEFAULT_USER_ID, category_menu, "Работа")
+    combined = " ".join(m.text or "" for m in filtered)
+    assert "passport" in combined

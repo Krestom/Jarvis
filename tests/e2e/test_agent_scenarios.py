@@ -14,6 +14,7 @@ from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import KnowledgeSource, KnowledgeType, TaskBucket
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
+from jarvis.repositories.improvements import ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import TaskDraft
@@ -82,6 +83,47 @@ async def test_unknown_intent_goes_to_agent_not_dead_end(
     combined = " ".join(m.text or "" for m in messages)
     assert "Помогу: уточните" in combined
     assert "Не понял сообщение" not in combined
+
+
+async def test_backlog_mentions_route_to_agent_without_invocation(
+    test_settings, session_factory, session
+):
+    """«Запиши в бэклог ...» — пожелание к Jarvis, а не задача (регрессия)."""
+    ai = FakeProvider()
+    ai.queue_plan(PlanStep(type="tool_call", tool="list_improvements", args={"status": "open"}))
+    ai.queue_plan(
+        PlanStep(
+            type="tool_call",
+            tool="report_capability_gap",
+            args={
+                "title": "Уведомления о записях в диагностику",
+                "summary": "Хочу видеть уведомления, когда что-то пишется в диагностику",
+            },
+        )
+    )
+    ai.queue_plan(
+        PlanStep(type="reply", text="Записал в backlog: уведомления о записях в диагностику.")
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, "Запиши в бэклог: хочу уведомления о записях в диагностику"
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Записал в backlog" in combined
+    assert "Создать задачу?" not in combined  # не задача
+    assert "Сохранить запись?" not in combined  # не заметка
+    assert ai.calls == []  # обычная интерпретация не вызывалась
+    await session.commit()
+
+    items = await ImprovementRepository(session).list_items(limit=10)
+    assert [item.title for item in items] == ["Уведомления о записях в диагностику"]
+
+    # «Выведи бэклог» (без имени) тоже уходит агенту.
+    ai.queue_plan(PlanStep(type="tool_call", tool="list_improvements", args={"status": "open"}))
+    ai.queue_plan(PlanStep(type="reply", text="Открытых записей: 1."))
+    messages = await harness.send_text(DEFAULT_USER_ID, "Выведи бэклог")
+    assert any("Открытых записей: 1." in (m.text or "") for m in messages)
 
 
 async def test_agent_entity_choice_updates_conversation_context(
