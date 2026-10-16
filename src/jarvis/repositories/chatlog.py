@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,15 +24,16 @@ class ChatLogRepository:
         correlation_id: str | None = None,
         created_at: datetime | None = None,
     ) -> ChatMessage:
+        # Клиентское время: server now() одинаков внутри транзакции, а порядок
+        # сообщений в журнале должен быть детерминированным (и экспорт тоже).
         message = ChatMessage(
             telegram_user_id=telegram_user_id,
             direction=direction,
             source=source,
             text=text,
             correlation_id=correlation_id,
+            created_at=created_at or datetime.now(UTC),
         )
-        if created_at is not None:
-            message.created_at = created_at
         self._session.add(message)
         await self._session.flush()
         return message
