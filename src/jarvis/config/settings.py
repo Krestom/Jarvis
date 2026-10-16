@@ -117,6 +117,12 @@ class Settings(BaseSettings):
     web_search_provider: str = "none"
     web_search_max_results: int = 5
 
+    # --- Уведомления (напоминания о сроках, утренняя сводка) ---
+    notify_enabled: bool = True
+    notify_due_reminders: bool = True
+    notify_digest_time: str = "08:00"  # локальное время HH:MM (APP_TIMEZONE)
+    notify_poll_seconds: int = 60
+
     # --- Workflow TTL ---
     conversation_state_ttl_hours: int = 24
     pending_operation_ttl_minutes: int = 30

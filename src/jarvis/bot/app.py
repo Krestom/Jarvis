@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import traceback
 
 from aiogram import Bot, Dispatcher
@@ -56,6 +57,7 @@ def create_dispatcher(
     session_factory: async_sessionmaker[AsyncSession],
     ai: AIProvider,
     transcription=None,
+    bot: Bot | None = None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
     dispatcher["settings"] = settings
@@ -73,17 +75,48 @@ def create_dispatcher(
 
     authorizer = Authorizer(settings.telegram_allowed_user_ids)
     register_middlewares(dispatcher, session_factory, authorizer)
-    _register_error_handler(dispatcher, settings, session_factory)
+    _register_error_handler(dispatcher, settings, session_factory, bot)
 
     for router in build_routers():
         dispatcher.include_router(router)
     return dispatcher
 
 
+# Уведомления о сбоях: не чаще одного на заголовок в этом окне (защита от флуда
+# при циклической ошибке); словарь не должен расти бесконечно.
+_notified_titles: dict[str, float] = {}
+_NOTIFY_THROTTLE_SECONDS = 30.0
+
+
+def notification_allowed(title: str) -> bool:
+    now = time.monotonic()
+    last = _notified_titles.get(title)
+    if last is not None and now - last < _NOTIFY_THROTTLE_SECONDS:
+        return False
+    _notified_titles[title] = now
+    if len(_notified_titles) > 200:
+        for key in sorted(_notified_titles, key=_notified_titles.get)[:100]:
+            _notified_titles.pop(key, None)
+    return True
+
+
+async def send_failure_notification(
+    bot: Bot, owner_id: int, title: str, occurrences: int
+) -> None:
+    """Уведомить владельца о сбое, записанном в диагностику."""
+    await bot.send_message(
+        owner_id,
+        f"⚠️ Зафиксирован сбой: {title[:200]}\n"
+        f"Повторов: {occurrences}. Подробнее: /diagnostics",
+        parse_mode=None,
+    )
+
+
 def _register_error_handler(
     dispatcher: Dispatcher,
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
+    bot: Bot | None = None,
 ) -> None:
     """Технические сбои бота автоматически попадают в improvement backlog."""
 
@@ -94,7 +127,7 @@ def _register_error_handler(
             error_type = type(error).__name__
             message = str(error).strip() or error_type
             async with session_scope(session_factory) as session:
-                await ImprovementService(session, settings).record_failure(
+                item = await ImprovementService(session, settings).record_failure(
                     title=f"{error_type}: {message}",
                     summary=message,
                     component="telegram_bot",
@@ -108,6 +141,20 @@ def _register_error_handler(
                         "update_id": getattr(update, "update_id", None),
                     },
                 )
+            if (
+                bot is not None
+                and settings.telegram_allowed_user_ids
+                and notification_allowed(item.title)
+            ):
+                try:
+                    await send_failure_notification(
+                        bot,
+                        settings.telegram_allowed_user_ids[0],
+                        item.title,
+                        item.occurrence_count,
+                    )
+                except Exception:  # noqa: BLE001 - уведомление не важнее обработки
+                    log.exception("failed to send failure notification")
         except Exception:  # noqa: BLE001 - обработчик ошибок не должен падать
             log.exception("failed to record error to improvement backlog")
         return True

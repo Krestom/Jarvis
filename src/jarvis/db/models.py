@@ -507,3 +507,21 @@ class ChatMessage(Base):
         Index("ix_chat_messages_user_time", "telegram_user_id", "created_at"),
         Index("ix_chat_messages_created", "created_at"),
     )
+
+
+# --- Журнал уведомлений (напоминания и сводки) -------------------------------
+
+
+class NotificationLog(Base):
+    """Отметки об отправленных уведомлениях: (kind, ref) отправляется один раз."""
+
+    __tablename__ = "notification_log"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    ref: Mapped[str] = mapped_column(String(64), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (UniqueConstraint("kind", "ref", name="uq_notification_kind_ref"),)

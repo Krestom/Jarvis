@@ -21,6 +21,7 @@ from jarvis.logging_setup import setup_logging
 from jarvis.services.catalog import CatalogService
 from jarvis.transcription import create_transcription_provider
 from jarvis.workers.cleanup import cleanup_loop
+from jarvis.workers.notifier import notifier_loop
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ async def amain() -> int:
         bot = create_bot(settings)
         if isinstance(bot.session, RecordingAiohttpSession):
             bot.session.recorder = build_out_recorder(session_factory, settings)
-        dispatcher = create_dispatcher(settings, session_factory, ai, transcription)
+        dispatcher = create_dispatcher(settings, session_factory, ai, transcription, bot=bot)
         await setup_bot_commands(bot)
         polling_task = asyncio.create_task(
             dispatcher.start_polling(bot, handle_signals=False), name="telegram-polling"
@@ -125,6 +126,15 @@ async def amain() -> int:
             "telegram bot is disabled (token set: %s, allowed users: %s)",
             bool(settings.bot_token),
             len(settings.telegram_allowed_user_ids),
+        )
+
+    notifier_task = None
+    if bot is not None and settings.notify_enabled:
+        async def _notify(chat_id: int, text: str) -> None:
+            await bot.send_message(chat_id, text, parse_mode=None)
+
+        notifier_task = asyncio.create_task(
+            notifier_loop(session_factory, settings, stop, _notify), name="notifier"
         )
 
     log.info(
@@ -145,6 +155,8 @@ async def amain() -> int:
         await bot.session.close()
 
     await cleanup_task
+    if notifier_task is not None:
+        await notifier_task
     await engine.dispose()
     return 0
 
