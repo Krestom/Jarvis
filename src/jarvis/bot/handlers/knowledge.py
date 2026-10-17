@@ -7,10 +7,14 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.bot.callbacks import KbCB, KbListCB, uuid_hex
-from jarvis.bot.formatting import split_message
 from jarvis.bot.handlers.open_entity import parse_hex_uuid, render_knowledge_card
-from jarvis.bot.handlers.render import send_search_results
-from jarvis.bot.keyboards import PAGE_SIZE, knowledge_list_keyboard, main_menu
+from jarvis.bot.handlers.render import send_or_edit, send_search_results
+from jarvis.bot.keyboards import (
+    PAGE_SIZE,
+    knowledge_card_keyboard,
+    knowledge_list_keyboard,
+    main_menu,
+)
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import EngineOutcome
 from jarvis.domain.enums import PendingOpType
@@ -64,17 +68,16 @@ async def knowledge_action(
         return
 
     if callback_data.action in ("view", "full"):
-        text, markup = await render_knowledge_card(
-            session, item_id, full=callback_data.action == "full"
-        )
+        full = callback_data.action == "full"
+        text, markup = await render_knowledge_card(session, item_id, full=full)
         await callback.answer()
         if text is None:
             await callback.message.answer("Запись не найдена.", reply_markup=main_menu())
             return
-        for chunk in split_message(text):
-            await callback.message.answer(chunk)
-        if callback_data.action == "view":
-            await callback.message.answer("Действия:", reply_markup=markup)
+        # Карточка и полный текст правят сообщение, из которого открыты.
+        await send_or_edit(
+            callback.message, f"{text}\n\nДействия:", markup=markup, edit=True
+        )
         return
 
     if callback_data.action == "similar":
@@ -86,11 +89,18 @@ async def knowledge_action(
         hits = [hit for hit in hits if hit.entity_id != item_id]
         await callback.answer()
         if not hits:
-            await callback.message.answer("Похожих записей не нашлось.", reply_markup=main_menu())
+            await send_or_edit(
+                callback.message,
+                "Похожих записей не нашлось.",
+                markup=knowledge_card_keyboard(uuid_hex(item.id)),
+                edit=True,
+            )
             return
         await send_search_results(
             callback.message,
             EngineOutcome("", search_hits=hits, search_query=item.title, search_page=0),
+            edit=True,
+            back=("⬅️ К записи", KbCB(action="view", item_id=uuid_hex(item.id)).pack()),
         )
         return
 

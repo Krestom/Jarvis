@@ -10,13 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import TaskCB, TaskListCB, uuid_hex
-from jarvis.bot.formatting import esc, split_message, task_line
-from jarvis.bot.handlers.open_entity import parse_hex_uuid, render_task_card
+from jarvis.bot.formatting import esc, task_line
+from jarvis.bot.handlers.open_entity import (
+    parse_hex_uuid,
+    render_comments_view,
+    render_task_card,
+)
 from jarvis.bot.handlers.render import propose_and_send, send_or_edit, send_outcome
 from jarvis.bot.keyboards import (
     PAGE_SIZE,
     bucket_keyboard,
-    comments_keyboard,
     main_menu,
     task_categories_keyboard,
     task_list_keyboard,
@@ -24,7 +27,6 @@ from jarvis.bot.keyboards import (
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
-from jarvis.conversation.preview import fmt_dt_local
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import PendingOpType, TaskBucket
 from jarvis.repositories.categories import CategoryRepository
@@ -163,9 +165,8 @@ async def task_action(
         if text is None:
             await callback.message.answer("Задача не найдена.", reply_markup=main_menu())
             return
-        for chunk in split_message(text):
-            await callback.message.answer(chunk)
-        await callback.message.answer("Действия:", reply_markup=markup)
+        # Карточка правит сообщение, из которого её открыли (список/пикер/поиск).
+        await send_or_edit(callback.message, f"{text}\n\nДействия:", markup=markup, edit=True)
         return
 
     if task_id is None:
@@ -189,8 +190,11 @@ async def task_action(
 
     if action == "bucket":
         await callback.answer()
-        await callback.message.answer(
-            f"Группа для «{esc(task.title)}»:", reply_markup=bucket_keyboard(uuid_hex(task.id))
+        await send_or_edit(
+            callback.message,
+            f"Группа для «{esc(task.title)}»:",
+            markup=bucket_keyboard(uuid_hex(task.id)),
+            edit=True,
         )
         return
 
@@ -251,22 +255,13 @@ async def task_action(
         return
 
     if action == "comments":
-        comments = await TaskCommentRepository(session).list_for_task(task.id)
         await callback.answer()
-        if not comments:
-            await callback.message.answer(
-                f"💬 Комментариев к «{esc(task.title)}» пока нет.",
-                reply_markup=comments_keyboard([], uuid_hex(task.id)),
-            )
+        text, markup = await render_comments_view(session, settings, task.id)
+        if text is None:
+            await callback.message.answer("Задача не найдена.", reply_markup=main_menu())
             return
-        lines = [f"💬 <b>Комментарии</b> — {esc(task.title)}", ""]
-        for index, comment in enumerate(comments, start=1):
-            stamp = fmt_dt_local(comment.created_at, settings.tz)
-            lines.append(f"<b>{index}.</b> {esc(comment.content)}\n<i>{stamp}</i>")
-        for chunk in split_message("\n".join(lines)):
-            await callback.message.answer(chunk)
-        await callback.message.answer(
-            "Действия:", reply_markup=comments_keyboard(comments, uuid_hex(task.id))
+        await send_or_edit(
+            callback.message, f"{text}\n\nДействия:", markup=markup, edit=True
         )
         return
 

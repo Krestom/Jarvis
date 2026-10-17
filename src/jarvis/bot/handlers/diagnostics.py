@@ -112,12 +112,17 @@ async def cmd_diagnostics(
 async def menu_diagnostics(
     callback: CallbackQuery, session: AsyncSession, settings: Settings, ai: AIProvider
 ) -> None:
+    from jarvis.bot.handlers.render import send_or_edit
+
     lines, status_counts, category_counts = await _system_summary(
         session, settings, ai, callback.from_user.id
     )
     await callback.answer()
-    await callback.message.answer(
-        "\n".join(lines), reply_markup=diagnostics_keyboard(status_counts, category_counts)
+    await send_or_edit(
+        callback.message,
+        "\n".join(lines),
+        markup=diagnostics_keyboard(status_counts, category_counts),
+        edit=True,
     )
 
 

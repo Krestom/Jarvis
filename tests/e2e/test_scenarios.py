@@ -128,12 +128,13 @@ async def test_scenario_task_list_is_clickable(classic_settings, session_factory
     assert choices, "список задач должен быть кликабельным"
 
     opened = await harness.click_button(DEFAULT_USER_ID, choices[-1], "Обновить дашборд")
-    combined = " ".join(m.text or "" for m in opened)
-    assert "Обновить дашборд" in combined  # открылась карточка задачи
+    assert opened == []  # карточка правит сообщение списка
+    card_view = harness.current(choices[-1])
+    text = card_view.text or ""
+    assert "Обновить дашборд" in text  # открылась карточка задачи
     labels = [
         button.text
-        for message in keyboard_messages(opened)
-        for row in message.reply_markup.inline_keyboard
+        for row in card_view.reply_markup.inline_keyboard
         for button in row
     ]
     assert "🏁 Завершить" in labels  # в карточке есть действия
@@ -272,10 +273,8 @@ async def test_scenario_due_change_requires_confirmation(
     messages = await harness.send_text(DEFAULT_USER_ID, "/today")
     list_message = keyboard_messages(messages)[-1]
 
-    card_messages = await harness.click_button(
-        DEFAULT_USER_ID, list_message, "1. Продлить домен"
-    )
-    card_message = keyboard_messages(card_messages)[-1]
+    await harness.click_button(DEFAULT_USER_ID, list_message, "1. Продлить домен")
+    card_message = harness.current(list_message)
 
     due_messages = await harness.click_button(DEFAULT_USER_ID, card_message, "Изменить срок")
     assert any("перенести" in (m.text or "") for m in due_messages)
@@ -451,8 +450,11 @@ async def test_scenario_unauthorized_user_is_ignored(classic_settings, session_f
     assert count == 0
 
 
-# 7. Повторное нажатие подтверждения не дублирует операцию.
-async def test_scenario_confirm_is_idempotent(classic_settings, session_factory, session):
+# 7. После подтверждения кнопка исчезает: превью становится карточкой задачи.
+# (Идемпотентность повторного подтверждения — в integration/test_confirmation.py.)
+async def test_scenario_confirm_turns_preview_into_card(
+    classic_settings, session_factory, session
+):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -465,12 +467,20 @@ async def test_scenario_confirm_is_idempotent(classic_settings, session_factory,
     messages = await harness.send_text(DEFAULT_USER_ID, "Задача: один раз")
     confirmation = keyboard_messages(messages)[-1]
 
-    await harness.click_button(DEFAULT_USER_ID, confirmation, "Подтвердить")
-    await harness.click_button(DEFAULT_USER_ID, confirmation, "Подтвердить")
+    result = await harness.click_button(DEFAULT_USER_ID, confirmation, "Подтвердить")
+    assert result == []  # превью правится на месте, новых сообщений нет
     await session.commit()
 
     count = await session.scalar(select(func.count()).select_from(Task))
     assert count == 1
+
+    card_view = harness.current(confirmation)
+    assert "Один раз" in (card_view.text or "")  # превью стало карточкой задачи
+    labels = [
+        button.text for row in card_view.reply_markup.inline_keyboard for button in row
+    ]
+    assert "🏁 Завершить" in labels
+    assert "Подтвердить" not in labels  # подтверждать больше нечего
 
 
 # 8. Секреты шифруются, не показываются в превью и не ищутся.
@@ -512,12 +522,13 @@ async def test_scenario_task_comments_via_card(classic_settings, session_factory
     messages = await harness.send_text(DEFAULT_USER_ID, "/today")
     list_message = keyboard_messages(messages)[-1]
 
-    card_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "1. Проверить бэкап")
-    card_message = keyboard_messages(card_messages)[-1]
-
+    # Список -> карточка -> комментарии: всё правит одно сообщение.
+    await harness.click_button(DEFAULT_USER_ID, list_message, "1. Проверить бэкап")
+    card_message = harness.current(list_message)
     comments_menu = await harness.click_button(DEFAULT_USER_ID, card_message, "Комментарии")
-    empty_menu = keyboard_messages(comments_menu)[-1]
-    assert any("пока нет" in (m.text or "") for m in comments_menu)
+    assert comments_menu == []
+    empty_menu = harness.current(list_message)
+    assert "пока нет" in (empty_menu.text or "")
 
     prompt = await harness.click_button(DEFAULT_USER_ID, empty_menu, "Добавить комментарий")
     assert any("Напишите комментарий" in (m.text or "") for m in prompt)
@@ -533,14 +544,17 @@ async def test_scenario_task_comments_via_card(classic_settings, session_factory
     comments = await TaskCommentRepository(session).list_for_task(task_id)
     assert [comment.content for comment in comments] == ["Позвонить в поддержку сервера"]
 
-    # Комментарии видны в карточке задачи.
-    card_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "1. Проверить бэкап")
-    assert any("Позвонить в поддержку сервера" in (m.text or "") for m in card_messages)
+    # Комментарии видны в карточке задачи (свежий список -> карточка).
+    messages = await harness.send_text(DEFAULT_USER_ID, "/today")
+    list_message = keyboard_messages(messages)[-1]
+    await harness.click_button(DEFAULT_USER_ID, list_message, "1. Проверить бэкап")
+    card_text = harness.current(list_message).text or ""
+    assert "Позвонить в поддержку сервера" in card_text
 
     # Редактирование комментария из списка (регрессия: callback ≤ 64 байт).
-    card_message = keyboard_messages(card_messages)[-1]
-    comments_menu = await harness.click_button(DEFAULT_USER_ID, card_message, "Комментарии")
-    menu_message = keyboard_messages(comments_menu)[-1]
+    card_message = harness.current(list_message)
+    await harness.click_button(DEFAULT_USER_ID, card_message, "Комментарии")
+    menu_message = harness.current(list_message)
     edit_prompt = await harness.click_button(DEFAULT_USER_ID, menu_message, "Изменить 1")
     assert any("новую версию комментария" in (m.text or "") for m in edit_prompt)
 
@@ -977,13 +991,26 @@ async def test_scenario_document_category_flow(classic_settings, session_factory
 
     messages = await harness.send_text(DEFAULT_USER_ID, "/documents")
     list_message = keyboard_messages(messages)[-1]
-    card_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "1. passport")
-    actions_message = keyboard_messages(card_messages)[-1]
 
-    picker_messages = await harness.click_button(
-        DEFAULT_USER_ID, actions_message, "Категория"
-    )
-    picker_message = keyboard_messages(picker_messages)[-1]
+    # Список -> карточка -> пикер: всё правит одно сообщение.
+    card_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "1. passport")
+    assert card_messages == []
+    card_view = harness.current(list_message)
+    assert "Документ:" in (card_view.text or "")
+
+    picker_messages = await harness.click_button(DEFAULT_USER_ID, card_view, "Категория")
+    assert picker_messages == []
+    picker_message = harness.current(list_message)
+    assert "Выберите категорию для документа" in (picker_message.text or "")
+
+    # «⬅️ Назад» возвращает карточку в то же сообщение.
+    back_messages = await harness.click_button(DEFAULT_USER_ID, picker_message, "Назад")
+    assert back_messages == []
+    card_view = harness.current(list_message)
+    assert "Документ:" in (card_view.text or "")
+
+    await harness.click_button(DEFAULT_USER_ID, card_view, "Категория")
+    picker_message = harness.current(list_message)
     proposal = await harness.click_button(DEFAULT_USER_ID, picker_message, "Работа")
     assert any("Обновить документ?" in (m.text or "") for m in proposal)
     await confirm_last(harness, DEFAULT_USER_ID, proposal)

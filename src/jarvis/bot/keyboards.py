@@ -376,13 +376,20 @@ def knowledge_list_keyboard(items, page: int, has_next: bool) -> InlineKeyboardM
     return builder.as_markup()
 
 
-def knowledge_card_keyboard(item_id: str) -> InlineKeyboardMarkup:
+def knowledge_card_keyboard(item_id: str, *, full: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.add(
-        InlineKeyboardButton(
-            text="📖 Полный текст", callback_data=KbCB(action="full", item_id=item_id).pack()
+    if full:
+        builder.add(
+            InlineKeyboardButton(
+                text="📕 Свернуть", callback_data=KbCB(action="view", item_id=item_id).pack()
+            )
         )
-    )
+    else:
+        builder.add(
+            InlineKeyboardButton(
+                text="📖 Полный текст", callback_data=KbCB(action="full", item_id=item_id).pack()
+            )
+        )
     builder.add(
         InlineKeyboardButton(
             text="🔎 Похожие", callback_data=KbCB(action="similar", item_id=item_id).pack()
@@ -520,7 +527,7 @@ def search_results_keyboard(
             InlineKeyboardButton(
                 text=f"{index}. {kind_emoji.get(hit.kind, '•')} {hit.title[:24]}",
                 callback_data=SearchCB(
-                    action="open", kind=hit.kind, entity=uuid_hex(hit.entity_id)
+                    action="open", kind=hit.kind, entity=uuid_hex(hit.entity_id), page=page
                 ).pack(),
             )
         )

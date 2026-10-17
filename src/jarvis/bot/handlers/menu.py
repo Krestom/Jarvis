@@ -31,8 +31,9 @@ async def _edit_or_send(callback: CallbackQuery, text: str, markup, *, with_menu
 
 
 async def send_settings(
-    message: Message, session: AsyncSession, settings: Settings
+    message: Message, session: AsyncSession, settings: Settings, *, edit: bool = False
 ) -> None:
+    from jarvis.bot.handlers.render import send_or_edit
     from jarvis.bot.keyboards import settings_keyboard
     from jarvis.services.catalog import CatalogService
 
@@ -44,7 +45,9 @@ async def send_settings(
         f"Состояние сценариев живёт: {settings.conversation_state_ttl_hours} ч",
         "\n<b>Категории</b> (нажмите, чтобы переименовать):",
     ]
-    await message.answer("\n".join(lines), reply_markup=settings_keyboard(categories))
+    await send_or_edit(
+        message, "\n".join(lines), markup=settings_keyboard(categories), edit=edit
+    )
 
 
 async def menu_main(callback: CallbackQuery) -> None:
@@ -59,11 +62,15 @@ async def menu_search(callback: CallbackQuery, session: AsyncSession, settings: 
 
 
 async def menu_tasks(callback: CallbackQuery) -> None:
+    from jarvis.bot.handlers.render import send_or_edit
     from jarvis.bot.keyboards import tasks_menu_keyboard
 
     await callback.answer()
-    await callback.message.answer(
-        "📋 <b>Задачи</b>\nВыберите список:", reply_markup=tasks_menu_keyboard()
+    await send_or_edit(
+        callback.message,
+        "📋 <b>Задачи</b>\nВыберите список:",
+        markup=tasks_menu_keyboard(),
+        edit=True,
     )
 
 
@@ -71,14 +78,14 @@ async def menu_knowledge(callback: CallbackQuery, session: AsyncSession) -> None
     from jarvis.bot.handlers.knowledge import send_knowledge_list
 
     await callback.answer()
-    await send_knowledge_list(callback.message, session, page=0)
+    await send_knowledge_list(callback.message, session, page=0, edit=True)
 
 
 async def menu_documents(callback: CallbackQuery, session: AsyncSession) -> None:
     from jarvis.bot.handlers.documents import send_documents_list
 
     await callback.answer()
-    await send_documents_list(callback.message, session, page=0)
+    await send_documents_list(callback.message, session, page=0, edit=True)
 
 
 async def menu_secrets(
@@ -87,7 +94,7 @@ async def menu_secrets(
     from jarvis.bot.handlers.secrets import send_secrets_list
 
     await callback.answer()
-    await send_secrets_list(callback.message, session, settings, page=0)
+    await send_secrets_list(callback.message, session, settings, page=0, edit=True)
 
 
 async def menu_secret_new(
@@ -101,6 +108,8 @@ async def menu_secret_new(
 
 async def menu_projects(callback: CallbackQuery, session: AsyncSession) -> None:
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    from jarvis.bot.handlers.render import send_or_edit
 
     projects = await ProjectRepository(session).list_active(limit=30)
     lines = ["🗂 <b>Проекты</b>"]
@@ -119,8 +128,11 @@ async def menu_projects(callback: CallbackQuery, session: AsyncSession) -> None:
         [InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())],
     ]
     await callback.answer()
-    await callback.message.answer(
-        "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=builder)
+    await send_or_edit(
+        callback.message,
+        "\n".join(lines),
+        markup=InlineKeyboardMarkup(inline_keyboard=builder),
+        edit=True,
     )
 
 
@@ -128,14 +140,14 @@ async def menu_settings(
     callback: CallbackQuery, session: AsyncSession, settings: Settings
 ) -> None:
     await callback.answer()
-    await send_settings(callback.message, session, settings)
+    await send_settings(callback.message, session, settings, edit=True)
 
 
 async def menu_categories(
     callback: CallbackQuery, session: AsyncSession, settings: Settings
 ) -> None:
     await callback.answer()
-    await send_settings(callback.message, session, settings)
+    await send_settings(callback.message, session, settings, edit=True)
 
 
 async def menu_cancel_flow(

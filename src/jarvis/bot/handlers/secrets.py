@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import SecretCB, SecretListCB
-from jarvis.bot.formatting import secret_card_text, split_message
+from jarvis.bot.formatting import secret_card_text
 from jarvis.bot.handlers.open_entity import parse_hex_uuid
 from jarvis.bot.handlers.render import propose_and_send, send_outcome
 from jarvis.bot.keyboards import (
@@ -41,15 +41,19 @@ async def start_secret_flow(
 
 
 async def send_secrets_list(
-    message: Message, session: AsyncSession, settings: Settings, *, page: int
+    message: Message, session: AsyncSession, settings: Settings, *, page: int, edit: bool = False
 ) -> None:
+    from jarvis.bot.handlers.render import send_or_edit
+
     service = SecretService(session, settings)
     secrets = await service.list_metadata(limit=PAGE_SIZE, offset=page * PAGE_SIZE)
     if not secrets and page == 0:
-        await message.answer(
+        await send_or_edit(
+            message,
             "🔐 Секретов пока нет.\n\nКоманда /secret добавляет секрет: значение "
             "шифруется и не попадает в поиск, AI и MCP.",
-            reply_markup=main_menu(),
+            markup=main_menu(),
+            edit=edit,
         )
         return
     lines = ["🔐 <b>Секреты</b>", ""]
@@ -57,9 +61,9 @@ async def send_secrets_list(
         lines.append(f"{index}. {secret.name}")
     lines.append("\n<i>Значения не показываются в списках и поиске.</i>")
     markup = secrets_list_keyboard(secrets, page, has_next=len(secrets) >= PAGE_SIZE)
-    for chunk in split_message("\n".join(lines)):
-        await message.answer(chunk)
-    await message.answer("Выберите секрет:", reply_markup=markup)
+    await send_or_edit(
+        message, "\n".join(lines) + "\n\nВыберите секрет:", markup=markup, edit=edit
+    )
 
 
 async def secrets_page(
@@ -69,7 +73,9 @@ async def secrets_page(
     settings: Settings,
 ) -> None:
     await callback.answer()
-    await send_secrets_list(callback.message, session, settings, page=callback_data.page)
+    await send_secrets_list(
+        callback.message, session, settings, page=callback_data.page, edit=True
+    )
 
 
 async def secret_action(

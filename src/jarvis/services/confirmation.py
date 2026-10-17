@@ -24,6 +24,8 @@ class ConfirmResult:
     ok: bool
     summary: str
     already: bool = False
+    operation_type: PendingOpType | None = None
+    entity_id: str | None = None
 
 
 class ConfirmationService:
@@ -108,7 +110,12 @@ class ConfirmationService:
             entity_id=applied.entity_id,
             result="ok",
         )
-        return ConfirmResult(ok=True, summary=applied.summary)
+        return ConfirmResult(
+            ok=True,
+            summary=applied.summary,
+            operation_type=operation.operation_type,
+            entity_id=str(applied.entity_id) if applied.entity_id else None,
+        )
 
     async def cancel(self, telegram_user_id: int, operation_id) -> ConfirmResult:
         now = datetime.now(UTC)

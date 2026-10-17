@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 from aiogram import Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import SearchCB
-from jarvis.bot.formatting import split_message
 from jarvis.bot.handlers.open_entity import (
     parse_hex_uuid,
     render_document_card,
     render_knowledge_card,
     render_task_card,
 )
-from jarvis.bot.handlers.render import send_search_results
+from jarvis.bot.handlers.render import send_or_edit, send_search_results
 from jarvis.bot.keyboards import main_menu
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
@@ -36,6 +35,17 @@ async def search_action(
         await send_search_results(callback.message, outcome, edit=True)
         return
 
+    if callback_data.action == "page_go":
+        # Возврат из карточки к результатам поиска (страница — из колбэка).
+        engine = ConversationEngine(session, settings, ai)
+        outcome = await engine.search_page(callback.from_user.id, callback_data.page)
+        await callback.answer()
+        if outcome.search_query is None:
+            await send_or_edit(callback.message, outcome.text, markup=main_menu(), edit=True)
+            return
+        await send_search_results(callback.message, outcome, edit=True)
+        return
+
     if callback_data.action == "open":
         entity_id = parse_hex_uuid(callback_data.entity)
         if entity_id is None:
@@ -52,9 +62,21 @@ async def search_action(
         if text is None:
             await callback.message.answer("Запись не найдена.", reply_markup=main_menu())
             return
-        for chunk in split_message(text):
-            await callback.message.answer(chunk)
-        await callback.message.answer("Действия:", reply_markup=markup)
+        # Карточка заменяет результаты поиска в том же сообщении.
+        if markup is not None:
+            markup.inline_keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text="⬅️ К результатам",
+                        callback_data=SearchCB(
+                            action="page_go", page=callback_data.page
+                        ).pack(),
+                    )
+                ]
+            )
+        await send_or_edit(
+            callback.message, f"{text}\n\nДействия:", markup=markup, edit=True
+        )
         return
 
     await callback.answer("Неизвестное действие", show_alert=True)

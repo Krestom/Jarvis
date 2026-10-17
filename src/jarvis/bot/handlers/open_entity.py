@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.bot.formatting import document_card_text, esc, knowledge_card_text, task_card_text
 from jarvis.bot.keyboards import (
+    comments_keyboard,
     document_card_keyboard,
     knowledge_card_keyboard,
     task_card_keyboard,
@@ -58,8 +59,28 @@ async def render_knowledge_card(session: AsyncSession, item_id: uuid.UUID, *, fu
     if item is None:
         return None, None
     text = knowledge_card_text(item, full=full)
-    markup = knowledge_card_keyboard(uuid_hex(item.id))
+    markup = knowledge_card_keyboard(uuid_hex(item.id), full=full)
     return text, markup
+
+
+async def render_comments_view(session: AsyncSession, settings: Settings, task_id: uuid.UUID):
+    """Комментарии задачи с клавиатурой (карточка ↔ список комментариев)."""
+    from jarvis.bot.formatting import esc
+    from jarvis.conversation.preview import fmt_dt_local
+    from jarvis.repositories.comments import TaskCommentRepository
+
+    task = await TaskRepository(session).get(task_id)
+    if task is None:
+        return None, None
+    comments = await TaskCommentRepository(session).list_for_task(task_id)
+    keyboard = comments_keyboard(comments, uuid_hex(task.id))
+    if not comments:
+        return f"💬 Комментариев к «{esc(task.title)}» пока нет.", keyboard
+    lines = [f"💬 <b>Комментарии</b> — {esc(task.title)}", ""]
+    for index, comment in enumerate(comments, start=1):
+        stamp = fmt_dt_local(comment.created_at, settings.tz)
+        lines.append(f"<b>{index}.</b> {esc(comment.content)}\n<i>{stamp}</i>")
+    return "\n".join(lines), keyboard
 
 
 async def render_document_card(session: AsyncSession, document_id: uuid.UUID):

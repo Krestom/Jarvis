@@ -127,9 +127,7 @@ async def send_outcome(
         if text is None:
             await message.answer("Запись не найдена.", reply_markup=main_menu())
             return
-        for chunk in split_message(text):
-            await answer_safe(message, chunk)
-        await message.answer("Действия:", reply_markup=card_markup)
+        await send_or_edit(message, f"{text}\n\nДействия:", markup=card_markup)
         return
 
     # Экраны-списки (задачи/документы/знания): одна страница — одно сообщение,
@@ -205,7 +203,11 @@ async def send_outcome(
 
 
 async def send_search_results(
-    message: Message, outcome: EngineOutcome, *, edit: bool = False
+    message: Message,
+    outcome: EngineOutcome,
+    *,
+    edit: bool = False,
+    back: tuple[str, str] | None = None,
 ) -> None:
     hits = outcome.search_hits
     query = outcome.search_query or ""
@@ -235,4 +237,10 @@ async def send_search_results(
     markup = search_results_keyboard(
         hits, query, outcome.search_page, has_next=len(hits) >= PAGE_SIZE
     )
+    if back is not None:
+        from aiogram.types import InlineKeyboardButton
+
+        markup.inline_keyboard.append(
+            [InlineKeyboardButton(text=back[0], callback_data=back[1])]
+        )
     await send_or_edit(message, text, markup=markup, edit=edit)

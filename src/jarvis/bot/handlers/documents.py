@@ -11,9 +11,9 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.bot.callbacks import DocCB, DocListCB, uuid_hex
-from jarvis.bot.formatting import esc, split_message
+from jarvis.bot.formatting import esc
 from jarvis.bot.handlers.open_entity import parse_hex_uuid, render_document_card
-from jarvis.bot.handlers.render import propose_and_send
+from jarvis.bot.handlers.render import propose_and_send, send_or_edit
 from jarvis.bot.keyboards import (
     PAGE_SIZE,
     document_categories_keyboard,
@@ -48,8 +48,6 @@ async def send_documents_list(
     category: str = "",
     edit: bool = False,
 ) -> None:
-    from jarvis.bot.handlers.render import send_or_edit
-
     category_id = parse_hex_uuid(category)
     category_obj = (
         await CategoryRepository(session).get(category_id) if category_id else None
@@ -89,8 +87,6 @@ async def send_documents_list(
 async def documents_page(
     callback: CallbackQuery, callback_data: DocListCB, session: AsyncSession
 ) -> None:
-    from jarvis.bot.handlers.render import send_or_edit
-
     await callback.answer()
     if callback_data.category == "*":
         categories = await CatalogService(session).list_categories()
@@ -160,9 +156,8 @@ async def document_action(
         if text is None:
             await callback.message.answer("Документ не найден.", reply_markup=main_menu())
             return
-        for chunk in split_message(text):
-            await callback.message.answer(chunk)
-        await callback.message.answer("Действия:", reply_markup=markup)
+        # Карточка правит сообщение, из которого открыта (список/поиск).
+        await send_or_edit(callback.message, f"{text}\n\nДействия:", markup=markup, edit=True)
         return
 
     if callback_data.action == "category":
@@ -174,9 +169,11 @@ async def document_action(
         )
         categories = await CatalogService(session).list_categories()
         await callback.answer()
-        await callback.message.answer(
+        await send_or_edit(
+            callback.message,
             "Выберите категорию для документа:",
-            reply_markup=document_category_set_keyboard(categories, uuid_hex(document_id)),
+            markup=document_category_set_keyboard(categories, uuid_hex(document_id)),
+            edit=True,
         )
         return
 
