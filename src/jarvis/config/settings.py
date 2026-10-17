@@ -113,9 +113,11 @@ class Settings(BaseSettings):
     agent_research_markers: str = "исследуй,глубокий поиск,разберись детально,research"
 
     # --- Web-поиск (интерфейс research/) ---
-    # none | fake (реальный провайдер не подключён: нет настроенного API)
+    # none | fake | tavily (api.tavily.com, ключ TAVILY_API_KEY)
     web_search_provider: str = "none"
     web_search_max_results: int = 5
+    # Ключ Tavily для WEB_SEARCH_PROVIDER=tavily.
+    tavily_api_key: SecretStr = SecretStr("")
 
     # --- Уведомления (напоминания о сроках, утренняя сводка) ---
     notify_enabled: bool = True

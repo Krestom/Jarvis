@@ -15,9 +15,13 @@ def create_search_provider(settings: Settings) -> WebSearchProvider:
         from jarvis.research.fake import FakeSearchProvider
 
         return FakeSearchProvider()
+    if provider == "tavily":
+        from jarvis.research.tavily import TavilySearchProvider
+
+        return TavilySearchProvider(api_key=settings.tavily_api_key.get_secret_value())
     raise ValueError(
         f"unknown web search provider: {settings.web_search_provider!r} "
-        "(доступны: none, fake)"
+        "(доступны: none, fake, tavily)"
     )
 
 
