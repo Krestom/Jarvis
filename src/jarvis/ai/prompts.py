@@ -14,8 +14,11 @@ Markdown запрещён (** __ ##, списки через «-»); тег <br>
 
 Структура текста (важно):
 - список — символом «•», каждый пункт с новой строки, между пунктами пустая строка;
+- несколько фактов, свойств, вариантов или советов — оформляй списком «•», а не сплошным абзацем;
+- абзацы короткие: 1–3 предложения, между абзацами пустая строка;
 - переносы строк в JSON — экранированные \n, например: "Итог.\n\n• первый пункт";
 - не склеивай предложения и пункты: перед «•», «Источники:» и выводами — пустая строка;
+- в конце — «Источники:», ниже каждый URL отдельным пунктом «•»;
 - списки не оборачивай в blockquote сам — цитату для них добавляет система;
 - <blockquote> — только для настоящих цитат и выдержек;
 - не больше одного акцента жирным на ответ.
@@ -25,6 +28,9 @@ _MARKDOWN_BOLD_RE = re.compile(r"\*\*([^\n]+?)\*\*")
 # Модель вместо \n иногда ставит <br>/<br/>/<BR> (Telegram такой тег не умеет):
 # приводим к настоящим переносам до всех правил раскладки.
 _BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+# «…дренаж. Источники: • ссылка» — заголовок источников отдельным абзацем
+# (в начале строки не трогаем: он уже отделён).
+_SOURCES_HEAD_RE = re.compile(r"(?<=[^\s])[ \t]*Источники:[ \t]*")
 # Склеенные пункты: «…итог.• следующий» → пункт всегда начинает новую строку
 # (без `<`/`>`: чтобы не рвать уже готовые теги вроде `<blockquote>• …`).
 _BULLET_GLUE_RE = re.compile(r"(?<=[^\s<>])[ \t]*•[ \t]*")
@@ -33,6 +39,11 @@ _BULLET_GLUE_RE = re.compile(r"(?<=[^\s<>])[ \t]*•[ \t]*")
 _SINGLE_NL_BULLET_RE = re.compile(r"(?<![\n>])\n(?=•)")
 # Склеенные предложения: «…итог.Далее…» → отдельный абзац.
 _SENTENCE_GLUE_RE = re.compile(r"(?<=[.!?»])(?=[А-ЯЁA-Z«])")
+# Граница предложения для нарезки длинных абзацев («. С заглавной буквы»).
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z«])")
+# «Портянка»: строка длиннее порога режется на абзацы по ~целевому размеру.
+WALL_MIN_CHARS = 500
+PARAGRAPH_TARGET_CHARS = 300
 # Одиночный пункт, завёрнутый моделью в цитату, — распаковать и оформить единообразно.
 _LIST_QUOTE_RE = re.compile(
     r"^[ \t]*<blockquote(?: expandable)?>[ \t]*(•[^<]*)</blockquote>[ \t]*$", re.M
@@ -93,6 +104,33 @@ def _wrap_bullet_runs(text: str) -> str:
     return "\n".join(out)
 
 
+def _split_long_paragraphs(text: str) -> str:
+    """Длинную строку-«портянку» резать на абзацы по границам предложений.
+
+    Пункты списков и цитаты не трогаем: у них уже есть своя структура.
+    """
+    out: list[str] = []
+    for line in text.split("\n"):
+        if len(line) <= WALL_MIN_CHARS or line.lstrip().startswith("•") or "<blockquote" in line:
+            out.append(line)
+            continue
+        sentences = _SENTENCE_SPLIT_RE.split(line)
+        if len(sentences) < 3:
+            out.append(line)
+            continue
+        paragraphs: list[str] = []
+        current = ""
+        for sentence in sentences:
+            if current and len(current) + len(sentence) + 1 > PARAGRAPH_TARGET_CHARS:
+                paragraphs.append(current)
+                current = sentence
+            else:
+                current = f"{current} {sentence}".strip()
+        paragraphs.append(current)
+        out.append("\n\n".join(paragraphs))
+    return "\n".join(out)
+
+
 def normalize_llm_layout(text: str) -> str:
     """Раскладка ответа LLM: пункты, абзацы, списки-цитаты.
 
@@ -102,12 +140,14 @@ def normalize_llm_layout(text: str) -> str:
     if not text:
         return text
     text = _BR_RE.sub("\n", text)
+    text = _SOURCES_HEAD_RE.sub("\n\nИсточники: ", text)
     if "•" in text:
         text = _LIST_QUOTE_RE.sub(r"\1", text)
         text = _BULLET_GLUE_RE.sub("\n\n• ", text)
         text = _SINGLE_NL_BULLET_RE.sub("\n\n", text)
     text = _SENTENCE_GLUE_RE.sub("\n\n", text)
     text = _tidy_paragraphs(text)
+    text = _split_long_paragraphs(text)
     if "•" in text:
         text = _wrap_bullet_runs(text)
     # После списка-цитаты перед следующим абзацем — пустая строка.

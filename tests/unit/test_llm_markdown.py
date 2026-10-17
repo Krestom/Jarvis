@@ -145,7 +145,40 @@ def test_single_br_is_line_break():
     )
 
 
+def test_sources_heading_starts_new_paragraph():
+    text = (
+        "Варианты: • Первый рецепт. • Второй рецепт. Обязательно дренаж. "
+        "Источники: • https://a.dom • https://b.dom"
+    )
+    result = normalize_llm_layout(text)
+    assert "\n\nИсточники:\n\n<blockquote>• https://a.dom" in result
+    assert result.count("<blockquote>") == 2
+
+
+def test_sources_heading_at_line_start_untouched():
+    text = "Итог.\n\nИсточники:\n\n• https://a.dom"
+    assert normalize_llm_layout(text) == text
+
+
+def test_long_prose_wall_gets_paragraphs():
+    sentence = (
+        "Спатифиллуму нужен рыхлый грунт, который хорошо пропускает воду "
+        "и воздух к корням растения."
+    )
+    text = " ".join([sentence] * 6)
+    result = normalize_llm_layout(text)
+    assert "\n\n" in result
+    assert result.replace("\n\n", " ") == text  # контент не потерян и не искажён
+
+
+def test_short_prose_not_split():
+    text = "Короткий ответ про грунт. И ещё одно предложение."
+    assert normalize_llm_layout(text) == text
+
+
 def test_format_rules_mention_json_newlines():
     assert r"\n" in TELEGRAM_FORMAT_RULES
     assert "списки не оборачивай" in TELEGRAM_FORMAT_RULES.lower()
     assert "<br>" in TELEGRAM_FORMAT_RULES
+    assert "сплошным абзацем" in TELEGRAM_FORMAT_RULES
+    assert "Источники" in TELEGRAM_FORMAT_RULES
