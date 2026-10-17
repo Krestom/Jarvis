@@ -105,6 +105,34 @@ async def test_scenario_text_note_to_search(test_settings, session_factory, sess
 
 
 # 2. Голосовая задача -> транскрибация -> подтверждение -> задача с группой/сроком.
+async def test_scenario_task_list_is_clickable(test_settings, session_factory, session):
+    """Список задач из NL («на неделю») — кнопки открытия карточки, без /tasks."""
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="Обновить дашборд", bucket=TaskBucket.WEEK)
+    )
+    await session.commit()
+
+    ai = FakeProvider()
+    ai.queue(Interpretation(intent="list_tasks", entities={"view": "week"}, confidence=0.9))
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "Какие у меня задачи на неделю?")
+    assert any("Обновить дашборд" in (m.text or "") for m in messages)
+    choices = keyboard_messages(messages)
+    assert choices, "список задач должен быть кликабельным"
+
+    opened = await harness.click_button(DEFAULT_USER_ID, choices[-1], "Обновить дашборд")
+    combined = " ".join(m.text or "" for m in opened)
+    assert "Обновить дашборд" in combined  # открылась карточка задачи
+    labels = [
+        button.text
+        for message in keyboard_messages(opened)
+        for row in message.reply_markup.inline_keyboard
+        for button in row
+    ]
+    assert "🏁 Завершить" in labels  # в карточке есть действия
+
+
 async def test_scenario_voice_task(test_settings, session_factory, session):
     from zoneinfo import ZoneInfo
 
