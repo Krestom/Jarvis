@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -354,6 +355,21 @@ class AgentService:
             if not query:
                 return None
             return ("search", {"query": query[:200]})
+        if ui.name == "documents":
+            clean: dict = {}
+            category = str(params.get("category") or "").strip()
+            if category:
+                clean["category"] = category[:120]
+            return ("documents", clean)
+        if ui.name == "card":
+            kind = str(params.get("kind") or "").strip()
+            if kind not in ("task", "knowledge", "document"):
+                return None
+            try:
+                entity_id = uuid.UUID(str(params.get("id") or ""))
+            except (ValueError, AttributeError):
+                return None
+            return ("card", {"kind": kind, "id": str(entity_id)})
         return None
 
     async def _validate_choices(

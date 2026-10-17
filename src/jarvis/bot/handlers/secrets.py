@@ -37,7 +37,7 @@ async def start_secret_flow(
 ) -> None:
     engine = ConversationEngine(session, settings, ai)
     outcome = await engine.start_secret_flow(message.from_user.id)
-    await send_outcome(message, outcome)
+    await send_outcome(message, outcome, session, settings)
 
 
 async def send_secrets_list(

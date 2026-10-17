@@ -135,7 +135,7 @@ async def _transcribe_and_handle(
     outcome = await engine.handle_text(
         message.from_user.id, transcript, source=KnowledgeSource.VOICE
     )
-    await send_outcome(message, outcome)
+    await send_outcome(message, outcome, session, settings)
 
 
 def build_router() -> Router:

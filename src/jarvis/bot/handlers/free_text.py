@@ -33,7 +33,7 @@ async def free_text(
         session, settings, ai, gate=agent_gate, search_provider=search_provider
     )
     outcome = await engine.handle_text(message.from_user.id, text)
-    await send_outcome(message, outcome)
+    await send_outcome(message, outcome, session, settings)
 
 
 def build_router() -> Router:

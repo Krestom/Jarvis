@@ -34,7 +34,7 @@ from jarvis.domain.enums import (
 )
 from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.comments import TaskCommentRepository
-from jarvis.repositories.improvements import ImprovementRepository
+from jarvis.repositories.improvements import OPEN_STATUSES, ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
@@ -173,8 +173,28 @@ class AddCommentArgs(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
 
 
+class UpdateCommentArgs(BaseModel):
+    comment_id: uuid.UUID = Field(description="id комментария (из get_task)")
+    content: str = Field(min_length=1, max_length=4000, description="Новый текст комментария")
+
+
 class DeleteTaskArgs(BaseModel):
     task_id: uuid.UUID
+
+
+class DeleteKnowledgeArgs(BaseModel):
+    item_id: uuid.UUID = Field(description="id записи знаний (kind=knowledge из search_all)")
+
+
+class DeleteDocumentArgs(BaseModel):
+    document_id: uuid.UUID = Field(description="id документа (kind=document из search_all)")
+
+
+class RenameCategoryArgs(BaseModel):
+    name: str = Field(
+        min_length=1, max_length=120, description="Текущее название категории-папки"
+    )
+    new_name: str = Field(min_length=1, max_length=120, description="Новое название")
 
 
 class ListProjectsArgs(BaseModel):
@@ -216,9 +236,28 @@ class ListImprovementsArgs(BaseModel):
     limit: int = Field(default=10, ge=1, le=20)
 
 
+class UpdateImprovementArgs(BaseModel):
+    item_id: uuid.UUID = Field(description="id записи бэклога (из list_improvements)")
+    status: ImprovementStatus = Field(
+        description="new | reviewed | planned | implemented | wont_fix | archived"
+    )
+
+
 class ExportChatArgs(BaseModel):
     day: date | None = Field(
         default=None, description="День (YYYY-MM-DD); по умолчанию — сегодня"
+    )
+
+
+class ExportIssuesArgs(BaseModel):
+    status: str = Field(
+        default="open",
+        description="open (new+reviewed+planned) | all | new,reviewed,planned,"
+        "implemented,wont_fix,archived (через запятую)",
+    )
+    category: str | None = Field(
+        default=None,
+        description="failure | missing_capability | ux_friction | improvement_idea",
     )
 
 
@@ -255,8 +294,19 @@ class SendDocumentArgs(BaseModel):
 
 class UpdateDocumentArgs(BaseModel):
     document_id: uuid.UUID = Field(description="id документа (kind=document из search_all)")
-    sensitive: bool = Field(
-        description="true — пометить чувствительным, false — обычным (снимает защиту)"
+    title: str | None = Field(
+        default=None, min_length=1, max_length=300, description="Новое название документа"
+    )
+    category: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Название категории-папки; «нет»/«без категории» — убрать категорию",
+    )
+    # None — не трогать уровень; true/false — выставить явно.
+    sensitive: bool | None = Field(
+        default=None,
+        description="true — пометить чувствительным, false — обычным (снимает защиту); "
+        "не указывай, чтобы не менять",
     )
 
 
@@ -349,6 +399,34 @@ _TOOLS: dict[str, ToolMeta] = {
         mutating=True,
         risk="high",
     ),
+    "delete_knowledge": ToolMeta(
+        DeleteKnowledgeArgs,
+        "Удалить запись знаний. Высокий риск: инструмент только ОТПРАВЛЯЕТ "
+        "подтверждение, удаление произойдёт после кнопки пользователя.",
+        mutating=True,
+        risk="high",
+    ),
+    "delete_document": ToolMeta(
+        DeleteDocumentArgs,
+        "Удалить документ. Высокий риск: инструмент только ОТПРАВЛЯЕТ подтверждение, "
+        "удаление произойдёт после кнопки пользователя.",
+        mutating=True,
+        risk="high",
+    ),
+    "update_comment": ToolMeta(
+        UpdateCommentArgs,
+        "Изменить текст комментария задачи (id комментария — из get_task). Отправляет "
+        "превью с кнопкой подтверждения.",
+        mutating=True,
+        risk="low",
+    ),
+    "rename_category": ToolMeta(
+        RenameCategoryArgs,
+        "Переименовать категорию-папку по текущему названию. Отправляет превью с "
+        "кнопкой подтверждения.",
+        mutating=True,
+        risk="low",
+    ),
     "list_projects": ToolMeta(
         ListProjectsArgs,
         "Актуальные проекты (id и названия) — чтобы сопоставить название из речи.",
@@ -402,11 +480,27 @@ _TOOLS: dict[str, ToolMeta] = {
         mutating=False,
         risk="low",
     ),
+    "update_improvement": ToolMeta(
+        UpdateImprovementArgs,
+        "Сменить статус записи improvement backlog (как кнопки статусов в "
+        "/diagnostics). Применяется сразу, без кнопки подтверждения — вызывай только "
+        "по явной просьбе пользователя. id бери из list_improvements.",
+        mutating=True,
+        risk="medium",
+    ),
     "export_chat": ToolMeta(
         ExportChatArgs,
         "Выгрузить журнал диалога за день двумя файлами (Markdown + JSON) — они "
         "уйдут в чат вместе с ответом. Текст уже с маскировкой секретов. Используй, "
         "когда просят экспортировать/выгрузить переписку.",
+        mutating=False,
+        risk="low",
+    ),
+    "export_issues": ToolMeta(
+        ExportIssuesArgs,
+        "Выгрузить improvement backlog (диагностику) двумя файлами Markdown + JSON — "
+        "уйдут в чат вместе с ответом. По умолчанию — только открытые записи. "
+        "Используй, когда просят экспортировать backlog/проблемы/диагностику файлом.",
         mutating=False,
         risk="low",
     ),
@@ -429,9 +523,9 @@ _TOOLS: dict[str, ToolMeta] = {
     ),
     "update_document": ToolMeta(
         UpdateDocumentArgs,
-        "Изменить уровень чувствительности документа по id (из search_all). "
-        "Отправляет превью с кнопкой подтверждения — изменение применится после "
-        "нажатия.",
+        "Изменить название и/или уровень чувствительности документа по id "
+        "(из search_all). Отправляет превью с кнопкой подтверждения — изменение "
+        "применится после нажатия.",
         mutating=True,
         risk="medium",
     ),
@@ -818,6 +912,54 @@ class ToolRegistry:
             },
         )
 
+    async def _export_issues(self, args: ExportIssuesArgs) -> ToolResult:
+        from jarvis.services.improvement_export import export_backlog
+
+        status = args.status.strip()
+        statuses: tuple[ImprovementStatus, ...] | None = OPEN_STATUSES
+        if status == "all":
+            statuses = None
+        elif status != "open":
+            try:
+                statuses = tuple(
+                    ImprovementStatus(part.strip())
+                    for part in status.split(",")
+                    if part.strip()
+                )
+            except ValueError:
+                return ToolResult.failure("validation", "неизвестный статус")
+        category = None
+        if args.category:
+            try:
+                category = ImprovementCategory(args.category)
+            except ValueError:
+                return ToolResult.failure("validation", "неизвестная категория")
+        result = await export_backlog(
+            ImprovementRepository(self._session),
+            statuses=statuses,
+            category=category,
+            tz=self._settings.tz,
+        )
+        stamp = datetime.now(self._settings.tz).strftime("%Y%m%d_%H%M%S")
+        self.outgoing_files.append(
+            OutgoingFile(
+                filename=f"jarvis_issues_{stamp}.md", data=result.markdown.encode("utf-8")
+            )
+        )
+        self.outgoing_files.append(
+            OutgoingFile(
+                filename=f"jarvis_issues_{stamp}.json",
+                data=result.json_text.encode("utf-8"),
+            )
+        )
+        return ToolResult(
+            ok=True,
+            data={
+                "item_count": result.item_count,
+                "note": "два файла (MD и JSON) отправятся в чат вместе с ответом",
+            },
+        )
+
     async def _web_search(self, args: WebSearchArgs) -> ToolResult:
         limit = min(args.limit, self._settings.web_search_max_results)
         results = await self._search_provider.search(args.query, limit=limit)
@@ -950,6 +1092,21 @@ class ToolRegistry:
             summary=f"категория «{name}»",
         )
 
+    async def _rename_category(self, args: RenameCategoryArgs) -> ToolResult:
+        category = await CategoryRepository(self._session).find_by_name(args.name)
+        if category is None:
+            return ToolResult.failure(
+                "not_found", f"категория «{args.name}» не найдена", mutating=True
+            )
+        new_name = args.new_name.strip()[:120]
+        result = await self._propose(
+            PendingOpType.RENAME_CATEGORY,
+            {"category_id": str(category.id), "new_name": new_name},
+            summary=f"категория «{category.name}» → «{new_name}»",
+        )
+        result.data["category_id"] = str(category.id)
+        return result
+
     async def _category_already_proposed(self, name: str) -> bool:
         """Уже висит неподтверждённое предложение создать такую категорию."""
         from sqlalchemy import select
@@ -1021,6 +1178,22 @@ class ToolRegistry:
         result.data["task_title"] = task.title
         return result
 
+    async def _update_comment(self, args: UpdateCommentArgs) -> ToolResult:
+        comment = await TaskCommentRepository(self._session).get(args.comment_id)
+        if comment is None:
+            return ToolResult.failure("not_found", "комментарий не найден", mutating=True)
+        result = await self._propose(
+            PendingOpType.UPDATE_COMMENT,
+            {
+                "comment_id": str(comment.id),
+                "task_id": str(comment.task_id),
+                "content": args.content,
+            },
+            summary="комментарий",
+        )
+        result.data["comment_id"] = str(comment.id)
+        return result
+
     async def _update_knowledge(self, args: UpdateKnowledgeArgs) -> ToolResult:
         repo = KnowledgeRepository(self._session)
         item = await repo.get(args.item_id)
@@ -1068,17 +1241,54 @@ class ToolRegistry:
     async def _update_document(self, args: UpdateDocumentArgs) -> ToolResult:
         from jarvis.repositories.documents import DocumentRepository
 
+        changes: dict = {}
+        if args.title is not None:
+            changes["title"] = args.title.strip()
+        if args.category is not None:
+            name = args.category.strip()
+            if name.lower() in ("нет", "без категории", "none", "-", ""):
+                changes["category_id"] = None
+            else:
+                category = await CategoryRepository(self._session).find_by_name(name)
+                if category is None:
+                    return ToolResult.failure(
+                        "not_found",
+                        f"категория «{name}» не найдена (создаётся в /settings)",
+                        mutating=True,
+                    )
+                changes["category_id"] = str(category.id)
+        if args.sensitive is not None:
+            changes["sensitivity"] = (
+                Sensitivity.SENSITIVE if args.sensitive else Sensitivity.NORMAL
+            ).value
+        if not changes:
+            return ToolResult.failure("validation", "не указаны изменения", mutating=True)
         document = await DocumentRepository(self._session).get(args.document_id)
         if document is None:
             return ToolResult.failure("not_found", "документ не найден", mutating=True)
-        sensitivity = Sensitivity.SENSITIVE if args.sensitive else Sensitivity.NORMAL
         result = await self._propose(
             PendingOpType.UPDATE_DOCUMENT,
-            {"document_id": str(args.document_id), "sensitivity": sensitivity.value},
+            {"document_id": str(args.document_id), **changes},
             summary=f"документ «{document.title}»",
         )
-        result.data["changes"] = ["sensitivity"]
+        result.data["changes"] = sorted(changes)
         return result
+
+    async def _update_improvement(self, args: UpdateImprovementArgs) -> ToolResult:
+        repo = ImprovementRepository(self._session)
+        item = await repo.get(args.item_id)
+        if item is None:
+            return ToolResult.failure("not_found", "запись бэклога не найдена", mutating=True)
+        await repo.update_status(item, args.status)
+        return ToolResult(
+            ok=True,
+            mutating=True,
+            data={
+                "item_id": str(item.id),
+                "title": item.title,
+                "status": args.status.value,
+            },
+        )
 
     async def _delete_task(self, args: DeleteTaskArgs) -> ToolResult:
         task = await TaskRepository(self._session).get(args.task_id)
@@ -1090,6 +1300,32 @@ class ToolRegistry:
             summary=f"удаление задачи «{task.title}»",
         )
         result.data["task_title"] = task.title
+        return result
+
+    async def _delete_knowledge(self, args: DeleteKnowledgeArgs) -> ToolResult:
+        item = await KnowledgeRepository(self._session).get(args.item_id)
+        if item is None:
+            return ToolResult.failure("not_found", "запись не найдена", mutating=True)
+        result = await self._propose(
+            PendingOpType.DELETE_KNOWLEDGE,
+            {"entity_id": str(item.id)},
+            summary=f"удаление записи «{item.title}»",
+        )
+        result.data["title"] = item.title
+        return result
+
+    async def _delete_document(self, args: DeleteDocumentArgs) -> ToolResult:
+        from jarvis.repositories.documents import DocumentRepository
+
+        document = await DocumentRepository(self._session).get(args.document_id)
+        if document is None:
+            return ToolResult.failure("not_found", "документ не найден", mutating=True)
+        result = await self._propose(
+            PendingOpType.DELETE_DOCUMENT,
+            {"entity_id": str(document.id)},
+            summary=f"удаление документа «{document.title}»",
+        )
+        result.data["title"] = document.title
         return result
 
     async def _report_capability_gap(self, args: ReportGapArgs) -> ToolResult:

@@ -174,9 +174,11 @@ async def apply_operation(
         document = await repo.get(update.document_id)
         if document is None:
             raise NotFoundError("Документ не найден")
-        # Меняем только явно переданные поля: category_id (с возможной очисткой)
-        # или sensitivity — превью и payload задают ровно одно из них.
+        # Меняем только явно переданные поля: title, category_id (с возможной
+        # очисткой) и/или sensitivity — payload задаёт ровно то, что меняется.
         fields: dict = {}
+        if update.title is not None:
+            fields["title"] = update.title
         if "category_id" in update.model_fields_set:
             if update.category_id is not None and (
                 await CategoryRepository(session).get(update.category_id) is None

@@ -17,8 +17,8 @@ from jarvis.domain.enums import (
     ImprovementStatus,
 )
 
-# Открытые статусы: по ним ищется повтор проблемы (дедупликация).
-_OPEN_STATUSES = (
+# Открытые статусы: по ним ищется повтор проблемы (дедупликация) и фильтр экспорта.
+OPEN_STATUSES = (
     ImprovementStatus.NEW,
     ImprovementStatus.REVIEWED,
     ImprovementStatus.PLANNED,
@@ -46,7 +46,7 @@ class ImprovementRepository:
     ) -> ImprovementItem | None:
         """Открытая запись с тем же источником, компонентом и заголовком."""
         query = select(ImprovementItem).where(
-            ImprovementItem.status.in_(_OPEN_STATUSES),
+            ImprovementItem.status.in_(OPEN_STATUSES),
             ImprovementItem.source == source,
             func.lower(ImprovementItem.title) == title.strip().lower(),
         )

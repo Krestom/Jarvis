@@ -32,7 +32,7 @@ async def search_action(
         engine = ConversationEngine(session, settings, ai)
         outcome = await engine.search_page(callback.from_user.id, callback_data.page)
         await callback.answer()
-        await send_outcome(callback.message, outcome)
+        await send_outcome(callback.message, outcome, session, settings)
         return
 
     if callback_data.action == "open":

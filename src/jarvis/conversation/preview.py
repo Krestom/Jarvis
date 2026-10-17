@@ -266,7 +266,11 @@ async def render_preview(
         if document is None:
             lines.append("Документ не найден.\n")
         else:
-            lines.append(_line("Документ", document.title))
+            if payload.get("title"):
+                new_title = html.escape(str(payload["title"]))
+                lines.append(_line("Название", f"{html.escape(document.title)} → {new_title}"))
+            else:
+                lines.append(_line("Документ", document.title))
             if "category_id" in payload:
                 old = await _category_name(session, document.category_id)
                 new = await _category_name(session, payload.get("category_id"))

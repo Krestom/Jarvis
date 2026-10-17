@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from aiogram import Router
 from aiogram.types import CallbackQuery, Message
@@ -51,7 +51,16 @@ async def build_task_list(
 ) -> tuple[str, object]:
     service = TaskService(session)
     now = datetime.now(UTC)
-    if view == "category":
+    if view == "date":
+        try:
+            day = date.fromisoformat(value)
+        except ValueError:
+            return "📋 Дата не распознана — откройте список заново.", main_menu()
+        tasks = await service.list_on_date(
+            day, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+        )
+        title = f"📋 Задачи на {day.strftime('%d.%m.%Y')}"
+    elif view == "category":
         category_id = parse_hex_uuid(value)
         category = (
             await CategoryRepository(session).get(category_id) if category_id else None
@@ -282,7 +291,7 @@ async def task_action(
         engine = ConversationEngine(session, settings, ai)
         outcome = await engine.choose_task_for_comment(user_id, str(task.id))
         await callback.answer()
-        await send_outcome(callback.message, outcome)
+        await send_outcome(callback.message, outcome, session, settings)
         return
 
     await callback.answer("Неизвестное действие", show_alert=True)

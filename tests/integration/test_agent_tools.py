@@ -522,3 +522,197 @@ async def test_update_document_sensitivity_needs_confirmation(session, test_sett
         "update_document", {"document_id": str(uuid.uuid4()), "sensitive": True}
     )
     assert missing.ok is False and missing.error_kind == "not_found"
+
+
+async def test_update_document_rename(session, test_settings):
+    from jarvis.documents.storage import EncryptedFileStorage
+    from jarvis.services.confirmation import ConfirmationService
+    from jarvis.services.documents import DocumentService
+
+    storage = EncryptedFileStorage(
+        test_settings.document_storage_path, test_settings.document_keyring()
+    )
+    document = await DocumentService(session, test_settings, storage).stage_upload(
+        data=b"bytes", original_filename="file.pdf", mime_type="application/pdf"
+    )
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call(
+        "update_document", {"document_id": str(document.id), "title": "Регалетта"}
+    )
+    assert result.ok is True
+    assert result.data["changes"] == ["title"]
+    await ConfirmationService(session, test_settings).confirm(
+        USER, registry.pending_operation_ids[-1]
+    )
+    assert document.title == "Регалетта"
+
+    empty = await registry.call("update_document", {"document_id": str(document.id)})
+    assert empty.ok is False and empty.error_kind == "validation"
+
+
+async def test_export_issues_tool_queues_files(session, test_settings):
+    from jarvis.services.improvements import ImprovementService
+
+    await ImprovementService(session, test_settings).record_gap(
+        title="Нет плана на отпуск", summary="Просили выгрузить бэклог файлом"
+    )
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call("export_issues", {})
+    assert result.ok is True
+    assert result.data["item_count"] == 1
+    names = [file.filename for file in registry.outgoing_files]
+    assert len(names) == 2
+    assert names[0].startswith("jarvis_issues_") and names[0].endswith(".md")
+    assert names[1].endswith(".json")
+    assert "Нет плана на отпуск" in registry.outgoing_files[0].data.decode("utf-8")
+
+    bad = await registry.call("export_issues", {"status": "nonsense"})
+    assert bad.ok is False and bad.error_kind == "validation"
+
+
+async def test_update_document_category_set_and_clear(session, test_settings):
+    from jarvis.documents.storage import EncryptedFileStorage
+    from jarvis.repositories.categories import CategoryRepository
+    from jarvis.services.confirmation import ConfirmationService
+    from jarvis.services.documents import DocumentService
+
+    category = await CategoryRepository(session).create("Рабочие")
+    storage = EncryptedFileStorage(
+        test_settings.document_storage_path, test_settings.document_keyring()
+    )
+    document = await DocumentService(session, test_settings, storage).stage_upload(
+        data=b"bytes", original_filename="file.pdf", mime_type="application/pdf"
+    )
+    registry = make_registry(session, test_settings)
+    confirmation = ConfirmationService(session, test_settings)
+
+    set_op = await registry.call(
+        "update_document", {"document_id": str(document.id), "category": "рабочие"}
+    )
+    assert set_op.ok is True
+    await confirmation.confirm(USER, registry.pending_operation_ids[-1])
+    assert document.category_id == category.id
+
+    clear_op = await registry.call(
+        "update_document", {"document_id": str(document.id), "category": "без категории"}
+    )
+    assert clear_op.ok is True
+    await confirmation.confirm(USER, registry.pending_operation_ids[-1])
+    assert document.category_id is None
+
+    missing = await registry.call(
+        "update_document", {"document_id": str(document.id), "category": "Нет такой"}
+    )
+    assert missing.ok is False and missing.error_kind == "not_found"
+
+
+async def test_delete_document_and_knowledge_tools(session, test_settings):
+    from jarvis.documents.storage import EncryptedFileStorage
+    from jarvis.domain.enums import KnowledgeSource, KnowledgeType
+    from jarvis.repositories.documents import DocumentRepository
+    from jarvis.services.confirmation import ConfirmationService
+    from jarvis.services.documents import DocumentService
+
+    storage = EncryptedFileStorage(
+        test_settings.document_storage_path, test_settings.document_keyring()
+    )
+    document = await DocumentService(session, test_settings, storage).stage_upload(
+        data=b"bytes", original_filename="file.pdf", mime_type="application/pdf"
+    )
+    item = await KnowledgeRepository(session).create(
+        type=KnowledgeType.NOTE,
+        title="Старая заметка",
+        content="Текст",
+        source_type=KnowledgeSource.TEXT,
+    )
+    registry = make_registry(session, test_settings)
+    confirmation = ConfirmationService(session, test_settings)
+
+    doc_op = await registry.call("delete_document", {"document_id": str(document.id)})
+    assert doc_op.ok is True and doc_op.data["status"] == "confirmation_required"
+    knowledge_op = await registry.call("delete_knowledge", {"item_id": str(item.id)})
+    assert knowledge_op.ok is True
+
+    await confirmation.confirm(USER, registry.pending_operation_ids[0])
+    await confirmation.confirm(USER, registry.pending_operation_ids[1])
+    assert await DocumentRepository(session).list_active() == []
+    assert await KnowledgeRepository(session).get(item.id) is None
+
+    missing = await registry.call("delete_document", {"document_id": str(uuid.uuid4())})
+    assert missing.ok is False and missing.error_kind == "not_found"
+
+
+async def test_update_comment_tool(session, test_settings):
+    from jarvis.repositories.comments import TaskCommentRepository
+    from jarvis.services.confirmation import ConfirmationService
+
+    task_id = await TaskService(session).create_from_draft(TaskDraft(title="Починить сервер"))
+    comments = TaskCommentRepository(session)
+    comment = await comments.create(task_id, "Позвонить в сервис")
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call(
+        "update_comment",
+        {"comment_id": str(comment.id), "content": "Написать в сервис письмом"},
+    )
+    assert result.ok is True and result.data["status"] == "confirmation_required"
+    assert comment.content == "Позвонить в сервис"  # до подтверждения не меняется
+
+    await ConfirmationService(session, test_settings).confirm(
+        USER, registry.pending_operation_ids[-1]
+    )
+    assert comment.content == "Написать в сервис письмом"
+
+    missing = await registry.call(
+        "update_comment", {"comment_id": str(uuid.uuid4()), "content": "текст"}
+    )
+    assert missing.ok is False and missing.error_kind == "not_found"
+
+
+async def test_rename_category_tool(session, test_settings):
+    from jarvis.repositories.categories import CategoryRepository
+    from jarvis.services.confirmation import ConfirmationService
+
+    await CategoryRepository(session).create("Рабочие")
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call(
+        "rename_category", {"name": "рабочие", "new_name": "Работа"}
+    )
+    assert result.ok is True and result.data["status"] == "confirmation_required"
+    await ConfirmationService(session, test_settings).confirm(
+        USER, registry.pending_operation_ids[-1]
+    )
+    repo = CategoryRepository(session)
+    assert await repo.find_by_name("Работа") is not None
+    assert await repo.find_by_name("Рабочие") is None
+
+    missing = await registry.call(
+        "rename_category", {"name": "Нет такой", "new_name": "X"}
+    )
+    assert missing.ok is False and missing.error_kind == "not_found"
+
+
+async def test_update_improvement_tool_changes_status_directly(session, test_settings):
+    from jarvis.services.improvements import ImprovementService
+
+    item = await ImprovementService(session, test_settings).record_gap(
+        title="Нет календаря", summary="Хочется календарь"
+    )
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call(
+        "update_improvement", {"item_id": str(item.id), "status": "planned"}
+    )
+    assert result.ok is True
+    assert result.data["status"] == "planned"
+    assert item.status.value == "planned"
+    # Без кнопки подтверждения — pending-операций не появилось.
+    assert registry.pending_operation_ids == []
+
+    bad = await registry.call(
+        "update_improvement", {"item_id": str(item.id), "status": "nonsense"}
+    )
+    assert bad.ok is False and bad.error_kind == "validation"

@@ -38,6 +38,7 @@ from jarvis.domain.enums import (
 from jarvis.logging_setup import get_correlation_id
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
+from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.catalog import CatalogService
@@ -53,7 +54,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 SEARCH_PAGE_SIZE = 7
-TASK_LIST_LIMIT = 20
+TASK_LIST_LIMIT = 7  # как PAGE_SIZE в bot/keyboards.py (пагинация TaskListCB)
+DOCUMENT_LIST_LIMIT = 7  # как PAGE_SIZE в bot/keyboards.py (пагинация DocListCB)
 
 _TASK_INTENTS = ("create_task",)
 _KNOWLEDGE_INTENTS = ("create_knowledge",)
@@ -104,6 +106,12 @@ class EngineOutcome:
     task_choices_prompt: str | None = None
     # Файлы (документы, экспорт чата), которые агент отдаёт вместе с ответом.
     files: list = field(default_factory=list)
+    # Документы для экрана «Список документов» (кнопки карточек).
+    documents: list = field(default_factory=list)
+    # Пагинация списка задач: (view, page, value, has_next) — как в /tasks.
+    task_page: tuple[str, int, str, bool] | None = None
+    # Карточка сущности, которую просит открыть агент: (kind, id).
+    card: tuple[str, str] | None = None
 
 
 class ConversationEngine:
@@ -537,9 +545,15 @@ class ConversationEngine:
             return await self._show_task_list(str(params.get("view") or "week"))
         if name == "search":
             return await self._do_search(telegram_user_id, str(params.get("query") or ""), page=0)
+        if name == "documents":
+            return await self._show_documents(params.get("category"))
+        if name == "card":
+            return EngineOutcome(
+                "", card=(str(params.get("kind") or ""), str(params.get("id") or ""))
+            )
         return None
 
-    async def _show_task_list(self, view: str) -> EngineOutcome:
+    async def _show_task_list(self, view: str, page: int = 0) -> EngineOutcome:
         """Список задач по динамической группе («какие у меня задачи на неделю»)."""
         if view not in TASK_VIEWS:
             view = "week"
@@ -548,18 +562,28 @@ class ConversationEngine:
             now=datetime.now(UTC),
             tz=self._settings.tz,
             limit=TASK_LIST_LIMIT,
+            offset=page * TASK_LIST_LIMIT,
         )
         title = TASK_VIEW_LABELS.get(view, "Задачи")
-        return self._render_task_list(f"📋 <b>{title}</b>", tasks)
+        return self._render_task_list(f"📋 <b>{title}</b>", tasks, view=view, page=page)
 
-    async def _show_tasks_on_date(self, day: date) -> EngineOutcome:
+    async def _show_tasks_on_date(self, day: date, page: int = 0) -> EngineOutcome:
         """Список задач с дедлайном на конкретный день («задачи на 19 октября»)."""
         tasks = await TaskService(self._session).list_on_date(
-            day, tz=self._settings.tz, limit=TASK_LIST_LIMIT
+            day,
+            tz=self._settings.tz,
+            limit=TASK_LIST_LIMIT,
+            offset=page * TASK_LIST_LIMIT,
         )
-        return self._render_task_list(f"📋 <b>Задачи на {day.strftime('%d.%m.%Y')}</b>", tasks)
+        return self._render_task_list(
+            f"📋 <b>Задачи на {day.strftime('%d.%m.%Y')}</b>",
+            tasks,
+            view="date",
+            page=page,
+            value=day.isoformat(),
+        )
 
-    async def _show_tasks_in_category(self, name: str) -> EngineOutcome:
+    async def _show_tasks_in_category(self, name: str, page: int = 0) -> EngineOutcome:
         """Список задач категории («покажи задачи в категории X»)."""
         category = await self._catalog.resolve_name(name)
         if category is None:
@@ -567,11 +591,53 @@ class ConversationEngine:
                 f"Категория «{html_escape(name)}» не найдена.", menu=self._menu_flag()
             )
         tasks = await TaskRepository(self._session).list_by_category(
-            category.id, limit=TASK_LIST_LIMIT
+            category.id, limit=TASK_LIST_LIMIT, offset=page * TASK_LIST_LIMIT
         )
-        return self._render_task_list(f"📋 <b>Задачи в «{html_escape(category.name)}»</b>", tasks)
+        return self._render_task_list(
+            f"📋 <b>Задачи в «{html_escape(category.name)}»</b>",
+            tasks,
+            view="category",
+            page=page,
+            value=str(category.id),
+        )
 
-    def _render_task_list(self, title: str, tasks) -> EngineOutcome:
+    async def _show_documents(self, category_name: str | None) -> EngineOutcome:
+        """Список документов («покажи список документов», экран агента documents)."""
+        category = None
+        if category_name:
+            category = await self._catalog.resolve_name(str(category_name))
+            if category is None:
+                return EngineOutcome(
+                    f"Категория «{html_escape(str(category_name))}» не найдена.",
+                    menu=self._menu_flag(),
+                )
+        documents = await DocumentRepository(self._session).list_active(
+            limit=DOCUMENT_LIST_LIMIT,
+            category_id=category.id if category else None,
+        )
+        title = f"🗂 <b>{html_escape(category.name)}</b>" if category else "📄 <b>Документы</b>"
+        if not documents:
+            if category is None:
+                return EngineOutcome(
+                    "📄 Пока нет документов.\n\nОтправьте файл одним сообщением — "
+                    "я зашифрую его и предложу сохранить.",
+                    menu=self._menu_flag(),
+                )
+            return EngineOutcome(f"{title}\n\nПусто.", menu=self._menu_flag())
+        lines = [title, ""]
+        for index, document in enumerate(documents, start=1):
+            lines.append(f"{index}. {html_escape(document.title)}")
+        return EngineOutcome("\n".join(lines), documents=documents)
+
+    def _render_task_list(
+        self,
+        title: str,
+        tasks,
+        *,
+        view: str | None = None,
+        page: int = 0,
+        value: str = "",
+    ) -> EngineOutcome:
         if not tasks:
             return EngineOutcome(f"{title}\n\nПусто.", menu=self._menu_flag())
         lines = [title, ""]
@@ -585,6 +651,7 @@ class ConversationEngine:
             task_choices=list(tasks),
             task_choices_action="view",
             task_choices_prompt="Нажмите на задачу, чтобы открыть карточку:",
+            task_page=(view, page, value, len(tasks) >= TASK_LIST_LIMIT) if view else None,
         )
 
     async def _show_comments(self, interpretation: Interpretation) -> EngineOutcome:

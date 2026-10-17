@@ -97,9 +97,10 @@ class DocumentDraft(BaseModel):
 
 
 class DocumentUpdate(BaseModel):
-    """Изменение метаданных документа (категория-папка, чувствительность)."""
+    """Изменение метаданных документа (название, категория-папка, чувствительность)."""
 
     document_id: uuid.UUID
+    title: str | None = Field(default=None, min_length=1, max_length=300)
     category_id: uuid.UUID | None = None
     sensitivity: Sensitivity | None = None
 

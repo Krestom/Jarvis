@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -500,6 +501,199 @@ async def test_agent_changes_document_sensitivity(test_settings, session_factory
     await session.commit()
     await session.refresh(document)
     assert document.sensitivity.value == "normal"
+
+
+async def test_agent_opens_documents_screen(test_settings, session_factory, session):
+    ai = FakeProvider()
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_document(
+        DEFAULT_USER_ID, filename="passport.pdf", content=b"%PDF-1.4 data"
+    )
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+
+    ai.queue_plan(
+        PlanStep(
+            type="reply",
+            text="Открываю список документов.",
+            ui=ScreenRequest(component="screen", name="documents", params={}),
+        )
+    )
+    messages = await harness.send_text(DEFAULT_USER_ID, "покажи список документов")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Документы" in combined
+    assert "passport" in combined
+    list_message = keyboard_messages(messages)[-1]
+
+    # Кнопка из настоящего списка открывает карточку документа.
+    card = await harness.click_button(DEFAULT_USER_ID, list_message, "1. passport")
+    card_combined = " ".join(m.text or "" for m in card)
+    assert "Документ:" in card_combined
+    assert "passport" in card_combined
+
+
+async def test_agent_renames_document(test_settings, session_factory, session):
+    ai = FakeProvider()
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_document(
+        DEFAULT_USER_ID, filename="passport.pdf", content=b"%PDF-1.4 data"
+    )
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    document = (await DocumentRepository(session).list_active())[0]
+
+    ai.queue_plan(
+        PlanStep(
+            type="tool_call",
+            tool="update_document",
+            args={"document_id": str(document.id), "title": "Регалетта"},
+        )
+    )
+    ai.queue_plan(PlanStep(type="reply", text="Подготовил переименование."))
+    proposal = await harness.send_text(
+        DEFAULT_USER_ID, "переименуй документ в «Регалетта»"
+    )
+    combined = " ".join(m.text or "" for m in proposal)
+    assert "Обновить документ?" in combined
+    assert "Регалетта" in combined
+
+    await confirm_last(harness, DEFAULT_USER_ID, proposal)
+    await session.commit()
+    await session.refresh(document)
+    assert document.title == "Регалетта"
+
+
+async def test_agent_exports_backlog_as_files(test_settings, session_factory, session):
+    from jarvis.services.improvements import ImprovementService
+
+    await ImprovementService(session, test_settings).record_gap(
+        title="Нет плана на отпуск", summary="Просили выгрузить бэклог файлом"
+    )
+    await session.commit()
+
+    ai = FakeProvider()
+    ai.queue_plan(PlanStep(type="tool_call", tool="export_issues", args={}))
+    ai.queue_plan(PlanStep(type="reply", text="Готово: backlog во вложениях."))
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "экспортируй backlog в файле")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Готово" in combined
+    sent = [m for m in messages if m.document is not None]
+    assert len(sent) == 2
+    names = sorted(m.document.file_name for m in sent)
+    assert names[0].startswith("jarvis_issues_") and names[0].endswith(".json")
+    assert names[1].endswith(".md")
+
+
+async def test_agent_opens_document_card_with_live_buttons(
+    test_settings, session_factory, session
+):
+    """Экран card: агент открывает карточку документа, кнопки на ней рабочие."""
+    ai = FakeProvider()
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_document(
+        DEFAULT_USER_ID, filename="passport.pdf", content=b"%PDF-1.4 data"
+    )
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    document = (await DocumentRepository(session).list_active())[0]
+
+    ai.queue_plan(
+        PlanStep(
+            type="reply",
+            text="Вот карточка документа.",
+            ui=ScreenRequest(
+                component="screen",
+                name="card",
+                params={"kind": "document", "id": str(document.id)},
+            ),
+        )
+    )
+    messages = await harness.send_text(DEFAULT_USER_ID, "открой карточку документа")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Документ:" in combined
+    card_message = keyboard_messages(messages)[-1]
+    labels = [
+        button.text for row in card_message.reply_markup.inline_keyboard for button in row
+    ]
+    assert any("Удалить" in label for label in labels)
+    assert any("Получить файл" in label for label in labels)
+
+    # Живая кнопка «🗑 Удалить» из карточки: превью + подтверждение.
+    delete_messages = await harness.click_button(DEFAULT_USER_ID, card_message, "Удалить")
+    assert any("Удалить документ?" in (m.text or "") for m in delete_messages)
+    await confirm_last(harness, DEFAULT_USER_ID, delete_messages)
+    await session.commit()
+    assert await DocumentRepository(session).list_active() == []
+
+
+async def test_agent_opens_task_card_screen(test_settings, session_factory, session):
+    task_id = await TaskService(session).create_from_draft(TaskDraft(title="Починить сервер"))
+    await session.commit()
+    ai = FakeProvider()
+    ai.queue_plan(
+        PlanStep(
+            type="reply",
+            text="Вот карточка задачи.",
+            ui=ScreenRequest(
+                component="screen",
+                name="card",
+                params={"kind": "task", "id": str(task_id)},
+            ),
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "открой карточку задачи")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Задача:" in combined
+    assert "Починить сервер" in combined
+    card_message = keyboard_messages(messages)[-1]
+    labels = [
+        button.text for row in card_message.reply_markup.inline_keyboard for button in row
+    ]
+    assert any("Завершить" in label for label in labels)
+    assert any("Комментарии" in label for label in labels)
+
+
+async def test_agent_pages_task_list_by_seven(test_settings, session_factory, session):
+    for index in range(1, 10):
+        await TaskService(session).create_from_draft(TaskDraft(title=f"Задача {index:02d}"))
+    await session.commit()
+
+    ai = FakeProvider()
+    ai.queue_plan(
+        PlanStep(
+            type="reply",
+            text="Открываю все задачи.",
+            ui=ScreenRequest(component="screen", name="tasks", params={"view": "all"}),
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "покажи все задачи списком")
+    page_one = " ".join(m.text or "" for m in messages)
+    first_page = set(re.findall(r"Задача \d\d", page_one))
+    assert len(first_page) == 7  # на странице ровно 7
+    list_message = keyboard_messages(messages)[-1]
+
+    # «➡️» правит то же сообщение (edit_text) — читаем актуальную версию.
+    next_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "➡️")
+    page_two = harness.current(list_message).text or ""
+    second_page = set(re.findall(r"Задача \d\d", page_two))
+    assert len(second_page) == 2
+    all_titles = {f"Задача {index:02d}" for index in range(1, 10)}
+    assert first_page | second_page == all_titles
+    assert not (first_page & second_page)  # страницы не пересекаются
+
+    page_two_message = keyboard_messages(next_messages)[-1]
+    await harness.click_button(DEFAULT_USER_ID, page_two_message, "⬅️")
+    page_back = harness.current(page_two_message).text or ""
+    assert set(re.findall(r"Задача \d\d", page_back)) == first_page
 
 
 async def test_agent_keeps_last_turns_in_context(test_settings, session_factory, session):

@@ -70,26 +70,41 @@ bot/handlers/free_text.py ──► conversation/engine.py  (роутинг)
 | `list_projects` | read | low | проекты (id/названия) |
 | `create_task` | mutation | low | превью + кнопка: задача создаётся после подтверждения |
 | `create_category` | mutation | low | превью + кнопка; идемпотентно (уже есть / уже предложена) |
+| `rename_category` | mutation | low | превью + кнопка: переименование категории-папки |
 | `update_task` | mutation | low | превью + кнопка: статус/приоритет/группа/срок/заголовок; `due_at=null` — убрать срок |
 | `add_comment` | mutation | low | превью + кнопка: комментарий к задаче |
+| `update_comment` | mutation | low | превью + кнопка: правка текста комментария (id из get_task) |
 | `delete_task` | mutation | **high** | только отправляет pending-подтверждение |
+| `delete_knowledge` | mutation | **high** | только отправляет pending-подтверждение (удаление заметки) |
+| `delete_document` | mutation | **high** | только отправляет pending-подтверждение (удаление документа) |
 | `create_knowledge` | mutation | medium | превью + кнопка: заметка (sensitive=true для кредов) |
 | `update_knowledge` | mutation | medium | превью + кнопка: правка заметки (заголовок/сводка/текст/категория/проект/чувствительность), работает и с sensitive |
-| `update_document` | mutation | medium | превью + кнопка: уровень чувствительности документа |
+| `update_document` | mutation | medium | превью + кнопка: название, категория-папка и/или чувствительность документа |
 | `web_search` | read | low | внешний поиск (Tavily; источники указываются в ответе) |
 | `report_capability_gap` | mutation | low | запись пробела в improvement backlog |
 | `list_improvements` | read | low | чтение backlog (для «покажи бэклог») |
+| `update_improvement` | mutation | medium | смена статуса записи backlog (как в /diagnostics; применяется сразу, без кнопки) |
 | `export_chat` | read | low | журнал диалога за день (MD + JSON) файлами в чат |
+| `export_issues` | read | low | improvement backlog (диагностика) файлами MD + JSON в чат |
 
-Файлы, подготовленные `send_document`/`export_chat`, уходят в чат вложениями
-сразу после текста ответа (поле `files` результата агента → `EngineOutcome`).
+Файлы, подготовленные `send_document`/`export_chat`/`export_issues`, уходят в чат
+вложениями сразу после текста ответа (поле `files` результата агента →
+`EngineOutcome`).
+
+Экраны (`ui = {"component": "screen", ...}`) — allow-list в
+`AgentService._validate_screen`: `tasks` (view/on_date/category), `search`
+(query), `documents` (category), `card` (kind=task|knowledge|document + id).
+Сервер строит настоящие списки и карточки с живыми кнопками действий; параметры
+валидируются, неизвестные экраны отбрасываются. Списки задач и документов —
+по 7 на страницу со стрелками «⬅️/➡️» (как в классических `/tasks` и
+`/documents`).
 
 Ошибки различаются по видам: `validation`, `not_found`, `unsupported`,
 `transient` (единственный вид, который повторяется — до
 `AGENT_MAX_TOOL_RETRIES`), `internal` (детали не утекают в LLM, только в логи).
 
-Высокий риск (`delete_task`) и правки (`create_knowledge`, `update_knowledge`,
-`update_document`)
+Высокий риск (`delete_task`, `delete_knowledge`, `delete_document`) и правки
+(`create_knowledge`, `update_knowledge`, `update_document`, `update_improvement`)
 не применяются сразу: создаётся pending-операция Stage 1, пользователю приходит
 превью с кнопкой «Подтвердить / Изменить / Отменить»; подтверждение привязано к
 пользователю и истекает по TTL. Если за один запрос предложено несколько

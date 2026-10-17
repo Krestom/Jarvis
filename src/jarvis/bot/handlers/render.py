@@ -7,6 +7,7 @@ import re
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BufferedInputFile, Message
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.bot.formatting import esc, split_message
 from jarvis.bot.keyboards import (
@@ -19,6 +20,7 @@ from jarvis.bot.keyboards import (
     quick_actions_keyboard,
     search_results_keyboard,
 )
+from jarvis.config.settings import Settings
 from jarvis.conversation.engine import EngineOutcome
 
 EMPTY_SEARCH_TEXT = "Ничего не нашёл. Уточните запрос или сохраните это как заметку."
@@ -64,9 +66,38 @@ async def propose_and_send(
     return operation_id
 
 
-async def send_outcome(message: Message, outcome: EngineOutcome) -> None:
+async def send_outcome(
+    message: Message, outcome: EngineOutcome, session: AsyncSession, settings: Settings
+) -> None:
     if outcome.search_query is not None:
         await send_search_results(message, outcome)
+        return
+
+    # Карточка сущности (агент открыл задачу/заметку/документ) — живые кнопки.
+    if outcome.card is not None:
+        from jarvis.bot.handlers.open_entity import (
+            parse_hex_uuid,
+            render_document_card,
+            render_knowledge_card,
+            render_task_card,
+        )
+
+        kind, entity_id = outcome.card
+        entity_uuid = parse_hex_uuid(entity_id)
+        text, card_markup = None, None
+        if entity_uuid is not None:
+            if kind == "task":
+                text, card_markup = await render_task_card(session, settings, entity_uuid)
+            elif kind == "knowledge":
+                text, card_markup = await render_knowledge_card(session, entity_uuid)
+            elif kind == "document":
+                text, card_markup = await render_document_card(session, entity_uuid)
+        if text is None:
+            await message.answer("Запись не найдена.", reply_markup=main_menu())
+            return
+        for chunk in split_message(text):
+            await answer_safe(message, chunk)
+        await message.answer("Действия:", reply_markup=card_markup)
         return
 
     markup = None
@@ -98,10 +129,32 @@ async def send_outcome(message: Message, outcome: EngineOutcome) -> None:
         await answer_safe(message, preview, reply_markup=confirm_keyboard(op_id))
 
     if outcome.task_choices:
+        if outcome.task_page is not None:
+            from jarvis.bot.keyboards import task_list_keyboard
+
+            view, page, value, has_next = outcome.task_page
+            await message.answer(
+                outcome.task_choices_prompt or "Выберите задачу:",
+                reply_markup=task_list_keyboard(
+                    outcome.task_choices, view, page, has_next, value
+                ),
+            )
+        else:
+            await message.answer(
+                outcome.task_choices_prompt or "Выберите задачу:",
+                reply_markup=comment_target_keyboard(
+                    outcome.task_choices, action=outcome.task_choices_action
+                ),
+            )
+
+    # Экран «Документы»: настоящие кнопки карточек (как в /documents).
+    if outcome.documents:
+        from jarvis.bot.keyboards import PAGE_SIZE, documents_list_keyboard
+
         await message.answer(
-            outcome.task_choices_prompt or "Выберите задачу:",
-            reply_markup=comment_target_keyboard(
-                outcome.task_choices, action=outcome.task_choices_action
+            "Выберите документ:",
+            reply_markup=documents_list_keyboard(
+                outcome.documents, 0, has_next=len(outcome.documents) >= PAGE_SIZE
             ),
         )
 
