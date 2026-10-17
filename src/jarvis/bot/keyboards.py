@@ -109,16 +109,20 @@ def confirm_keyboard(operation_id: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="✅ Подтвердить",
             callback_data=ConfirmCB(action="apply", op_id=operation_id).pack(),
+            style="success",
         )
     )
     builder.add(
         InlineKeyboardButton(
-            text="✏️ Изменить", callback_data=ConfirmCB(action="edit", op_id=operation_id).pack()
+            text="✏️ Изменить",
+            callback_data=ConfirmCB(action="edit", op_id=operation_id).pack(),
         )
     )
     builder.add(
         InlineKeyboardButton(
-            text="❌ Отменить", callback_data=ConfirmCB(action="cancel", op_id=operation_id).pack()
+            text="❌ Отменить",
+            callback_data=ConfirmCB(action="cancel", op_id=operation_id).pack(),
+            style="danger",
         )
     )
     builder.adjust(1)
@@ -129,7 +133,9 @@ def cancel_flow_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.add(
         InlineKeyboardButton(
-            text="❌ Отменить сценарий", callback_data=MenuCB(action="cancel_flow").pack()
+            text="❌ Отменить сценарий",
+            callback_data=MenuCB(action="cancel_flow").pack(),
+            style="danger",
         )
     )
     return builder.as_markup()
@@ -219,7 +225,9 @@ def task_card_keyboard(task_id: str, status: str, comments_count: int = 0) -> In
         )
         builder.add(
             InlineKeyboardButton(
-                text="🏁 Завершить", callback_data=TaskCB(action="done", task_id=task_id).pack()
+                text="🏁 Завершить",
+                callback_data=TaskCB(action="done", task_id=task_id).pack(),
+                style="success",
             )
         )
     comments_label = f"💬 Комментарии ({comments_count})" if comments_count else "💬 Комментарии"
@@ -231,7 +239,9 @@ def task_card_keyboard(task_id: str, status: str, comments_count: int = 0) -> In
     )
     builder.add(
         InlineKeyboardButton(
-            text="🗑 Удалить", callback_data=TaskCB(action="delete", task_id=task_id).pack()
+            text="🗑 Удалить",
+            callback_data=TaskCB(action="delete", task_id=task_id).pack(),
+            style="danger",
         )
     )
     builder.row(
@@ -247,6 +257,7 @@ def comments_keyboard(comments, task_id: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="➕ Добавить комментарий",
             callback_data=TaskCB(action="comment_add", task_id=task_id).pack(),
+            style="primary",
         )
     )
     for index, comment in enumerate(comments, start=1):
@@ -380,7 +391,9 @@ def knowledge_card_keyboard(item_id: str) -> InlineKeyboardMarkup:
     )
     builder.add(
         InlineKeyboardButton(
-            text="🗑 Удалить", callback_data=KbCB(action="delete", item_id=item_id).pack()
+            text="🗑 Удалить",
+            callback_data=KbCB(action="delete", item_id=item_id).pack(),
+            style="danger",
         )
     )
     builder.row(
@@ -476,6 +489,7 @@ def document_card_keyboard(doc_id: str, *, can_download: bool) -> InlineKeyboard
             InlineKeyboardButton(
                 text="📤 Получить файл",
                 callback_data=DocCB(action="download", doc_id=doc_id).pack(),
+                style="primary",
             )
         )
     builder.add(
@@ -485,7 +499,9 @@ def document_card_keyboard(doc_id: str, *, can_download: bool) -> InlineKeyboard
     )
     builder.add(
         InlineKeyboardButton(
-            text="🗑 Удалить", callback_data=DocCB(action="delete", doc_id=doc_id).pack()
+            text="🗑 Удалить",
+            callback_data=DocCB(action="delete", doc_id=doc_id).pack(),
+            style="danger",
         )
     )
     builder.row(
@@ -537,7 +553,9 @@ def settings_keyboard(categories) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.add(
         InlineKeyboardButton(
-            text="➕ Новая категория", callback_data=MenuCB(action="category_new").pack()
+            text="➕ Новая категория",
+            callback_data=MenuCB(action="category_new").pack(),
+            style="primary",
         )
     )
     for category in categories:
@@ -558,7 +576,9 @@ def secrets_list_keyboard(secrets, page: int, has_next: bool) -> InlineKeyboardM
     builder = InlineKeyboardBuilder()
     builder.add(
         InlineKeyboardButton(
-            text="➕ Новый секрет", callback_data=MenuCB(action="secret_new").pack()
+            text="➕ Новый секрет",
+            callback_data=MenuCB(action="secret_new").pack(),
+            style="primary",
         )
     )
     for index, secret in enumerate(secrets, start=1):
@@ -588,11 +608,14 @@ def secret_card_keyboard(secret_id: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="👁 Показать значение",
             callback_data=SecretCB(action="reveal", secret_id=secret_id).pack(),
+            style="primary",
         )
     )
     builder.add(
         InlineKeyboardButton(
-            text="🗑 Удалить", callback_data=SecretCB(action="delete", secret_id=secret_id).pack()
+            text="🗑 Удалить",
+            callback_data=SecretCB(action="delete", secret_id=secret_id).pack(),
+            style="danger",
         )
     )
     builder.row(
@@ -769,12 +792,14 @@ def backlog_card_keyboard(item, origin: str, page: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text="🗄 В архив",
                 callback_data=ImpCB(action="status", item_id=hex_id, value="archived").pack(),
+                style="danger",
             )
         )
     builder.add(
         InlineKeyboardButton(
             text="🗑 Удалить",
             callback_data=ImpCB(action="delete", item_id=hex_id, value=origin, page=page).pack(),
+            style="danger",
         )
     )
     kind, value = _parse_origin(origin)
@@ -794,6 +819,7 @@ def backlog_delete_keyboard(item_id: str, origin: str, page: int) -> InlineKeybo
         InlineKeyboardButton(
             text="🗑 Да, удалить",
             callback_data=ImpCB(action="delete_yes", item_id=item_id).pack(),
+            style="danger",
         )
     )
     builder.add(

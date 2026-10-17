@@ -159,6 +159,38 @@ async def test_chat_reply_returns_text():
     assert reply == "Привет! Чем помочь?"
 
 
+async def test_chat_reply_system_message_contains_format_rules():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return ok_response("Привет!")
+
+    provider = make_provider(handler)
+    await provider.chat_reply("привет", CTX)
+    system_content = captured["body"]["messages"][0]["content"]
+    assert "Markdown запрещён" in system_content
+    assert "<blockquote>" in system_content
+
+
+async def test_raw_newlines_inside_json_string_are_tolerated():
+    """Модель может положить реальный перенос в JSON-строку — без «ремонта» и склейки."""
+    calls = {"count": 0}
+    inner = '{"intent": "smalltalk", "reply": "Строка 1\nСтрока 2", "confidence": 0.5}'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        return httpx.Response(
+            200, text=json.dumps({"choices": [{"message": {"content": inner}}]})
+        )
+
+    provider = make_provider(handler)
+    result = await provider.interpret("привет", CTX)
+    assert result.intent == "smalltalk"
+    assert result.reply == "Строка 1\nСтрока 2"
+    assert calls["count"] == 1  # парсинг с первого раза, ремонтный запрос не понадобился
+
+
 async def test_long_prompt_is_truncated():
     captured: dict = {}
 

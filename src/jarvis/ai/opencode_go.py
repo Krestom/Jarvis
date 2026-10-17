@@ -23,7 +23,7 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from jarvis.ai.prompts import SYSTEM_PROMPT, build_user_prompt
+from jarvis.ai.prompts import SYSTEM_PROMPT, TELEGRAM_FORMAT_RULES, build_user_prompt
 from jarvis.ai.provider import AIError, InterpreterContext
 from jarvis.ai.schemas import Interpretation, PlanStep
 
@@ -55,7 +55,9 @@ def _parse_json_model(content: str, model_cls):
         end = candidate.rfind("}")
         if start != -1 and end > start:
             candidate = candidate[start : end + 1]
-    payload = json.loads(candidate)
+    # strict=False: модели иногда кладут реальные переносы строк внутрь JSON-строки —
+    # это не повод для «ремонтного» запроса, который склеивает текст в одну строку.
+    payload = json.loads(candidate, strict=False)
     return model_cls.model_validate(payload)
 
 
@@ -239,7 +241,7 @@ class OpenCodeGoProvider:
                 "content": (
                     "Ты — дружелюбный личный ассистент Jarvis. Отвечай кратко, по-русски, "
                     "без выполнения действий: любые изменения предлагает backend "
-                    "после подтверждения."
+                    "после подтверждения.\n\n" + TELEGRAM_FORMAT_RULES
                 ),
             },
             {"role": "user", "content": prompt},

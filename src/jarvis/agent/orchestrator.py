@@ -23,6 +23,7 @@ from jarvis.agent.routing import AGENT_FLOW, build_profile, detect_profile
 from jarvis.agent.schemas import EntityCandidate
 from jarvis.agent.tools import ToolRegistry, ToolResult
 from jarvis.ai import AIError, AIProvider, AIUnavailableError, InterpreterContext
+from jarvis.ai.prompts import format_llm_text
 from jarvis.ai.schemas import EntityChoice, PlanStep, UIRequest
 from jarvis.config.settings import Settings
 from jarvis.conversation.state import ConversationStore
@@ -170,7 +171,7 @@ class AgentService:
                 budget.note_usage(usage_tokens(context.usage))
 
                 if step.type == "reply":
-                    result.text = (step.text or "").strip()
+                    result.text = format_llm_text((step.text or "").strip())
                     await self._apply_ui(step, registry, stored, result)
                     break
 
@@ -281,7 +282,7 @@ class AgentService:
                 budget.note_llm_call()
                 budget.note_usage(usage_tokens(context.usage))
                 if step.type == "reply" and (step.text or "").strip():
-                    return step.text.strip()
+                    return format_llm_text(step.text.strip())
         except (AIError, TimeoutError, BudgetExhausted):
             log.info("agent wrap-up skipped (%s)", reason)
         findings_text = "; ".join(findings[-3:]) if findings else "ничего подтверждённого"

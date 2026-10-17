@@ -2,9 +2,121 @@
 
 from __future__ import annotations
 
+import re
+
 from jarvis.ai.provider import InterpreterContext
 
-SYSTEM_PROMPT = """\
+TELEGRAM_FORMAT_RULES = r"""\
+Разметка текстов для Telegram: только HTML-теги <b>, <i>, <u>, <s>, <code>,
+<pre>, <blockquote>, <blockquote expandable>, <a href="...">.
+Markdown запрещён (** __ ##, списки через «-»).
+
+Структура текста (важно):
+- список — символом «•», каждый пункт с новой строки, между пунктами пустая строка;
+- переносы строк в JSON — экранированные \n, например: "Итог.\n\n• первый пункт";
+- не склеивай предложения и пункты: перед «•», «Источники:» и выводами — пустая строка;
+- списки не оборачивай в blockquote сам — цитату для них добавляет система;
+- <blockquote> — только для настоящих цитат и выдержек;
+- не больше одного акцента жирным на ответ.
+"""
+
+_MARKDOWN_BOLD_RE = re.compile(r"\*\*([^\n]+?)\*\*")
+# Склеенные пункты: «…итог.• следующий» → пункт всегда начинает новую строку
+# (без `<`/`>`: чтобы не рвать уже готовые теги вроде `<blockquote>• …`).
+_BULLET_GLUE_RE = re.compile(r"(?<=[^\s<>])[ \t]*•[ \t]*")
+# Пункт после одиночного переноса получает пустую строку перед собой
+# (кроме переноса сразу после тега: `<blockquote>\n• …`).
+_SINGLE_NL_BULLET_RE = re.compile(r"(?<![\n>])\n(?=•)")
+# Склеенные предложения: «…итог.Далее…» → отдельный абзац.
+_SENTENCE_GLUE_RE = re.compile(r"(?<=[.!?»])(?=[А-ЯЁA-Z«])")
+# Одиночный пункт, завёрнутый моделью в цитату, — распаковать и оформить единообразно.
+_LIST_QUOTE_RE = re.compile(
+    r"^[ \t]*<blockquote(?: expandable)?>[ \t]*(•[^<]*)</blockquote>[ \t]*$", re.M
+)
+
+
+def normalize_llm_markdown(text: str) -> str:
+    """Страховка от markdown в ответах LLM: парные **…** → <b>…</b>.
+
+    Конвертируем только жирный; одиночные и несбалансированные звёздочки
+    не трогаем (могут быть частью текста).
+    """
+    if not text or "**" not in text:
+        return text
+    return _MARKDOWN_BOLD_RE.sub(r"<b>\1</b>", text)
+
+
+def _tidy_paragraphs(text: str) -> str:
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _wrap_bullet_runs(text: str) -> str:
+    """Подряд идущие пункты «• …» — одним <blockquote> (длинные — expandable)."""
+    lines = text.split("\n")
+    out: list[str] = []
+    run: list[str] = []
+    quote_depth = 0
+
+    def flush() -> None:
+        nonlocal run
+        items = [line for line in run if line.strip()]
+        if len(items) >= 2:
+            tag = "blockquote expandable" if len(items) > 6 else "blockquote"
+            body = "\n\n".join(items)
+            out.append(f"<{tag}>{body}</{tag.split()[0]}>")
+            if run and not run[-1].strip():
+                out.append("")
+        else:
+            out.extend(run)
+        run = []
+
+    for line in lines:
+        stripped = line.strip()
+        if quote_depth == 0 and stripped.startswith("•"):
+            run.append(stripped)
+            continue
+        if run and not stripped:
+            run.append("")  # пустая строка внутри списка не разрывает его
+            continue
+        if run:
+            flush()
+        quote_depth += line.count("<blockquote") - line.count("</blockquote>")
+        quote_depth = max(quote_depth, 0)
+        out.append(line)
+    flush()
+    return "\n".join(out)
+
+
+def normalize_llm_layout(text: str) -> str:
+    """Раскладка ответа LLM: пункты, абзацы, списки-цитаты.
+
+    Страховка на случай, когда модель склеивает пункты или забывает пустые
+    строки; для нормального текста идемпотентна.
+    """
+    if not text:
+        return text
+    if "•" in text:
+        text = _LIST_QUOTE_RE.sub(r"\1", text)
+        text = _BULLET_GLUE_RE.sub("\n\n• ", text)
+        text = _SINGLE_NL_BULLET_RE.sub("\n\n", text)
+    text = _SENTENCE_GLUE_RE.sub("\n\n", text)
+    text = _tidy_paragraphs(text)
+    if "•" in text:
+        text = _wrap_bullet_runs(text)
+    # После списка-цитаты перед следующим абзацем — пустая строка.
+    text = re.sub(r"</blockquote>\n(?=\S)", "</blockquote>\n\n", text)
+    return text
+
+
+def format_llm_text(text: str) -> str:
+    """Полная нормализация ответа LLM: markdown-страховка + раскладка."""
+    return normalize_llm_layout(normalize_llm_markdown(text))
+
+
+SYSTEM_PROMPT = (
+    """\
 Ты — разборщик личных сообщений ассистента Jarvis. Пользователь пишет по-русски
 (возможно, голосом через транскрипцию).
 
@@ -74,7 +186,11 @@ intent:
     поля («название должно быть ...», «перенеси на ...», «сделай приоритет ...»),
     верни в entities ИТОГОВЫЕ значения полей (например, новое title), сохранив
     остальные поля черновика без изменений.
+
+Требования к текстам для пользователя (поля reply и clarification_question):
 """
+    + TELEGRAM_FORMAT_RULES
+)
 
 
 def build_user_prompt(text: str, context: InterpreterContext) -> str:

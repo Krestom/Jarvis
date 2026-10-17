@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIError, AIProvider, AIUnavailableError, InterpreterContext
+from jarvis.ai.prompts import format_llm_text
 from jarvis.ai.schemas import Interpretation
 from jarvis.config.settings import Settings
 from jarvis.conversation.dates import parse_human_date
@@ -305,7 +306,9 @@ class ConversationEngine:
                 except AIError:
                     reply = "Привет! Готов помочь с задачами, заметками и поиском."
             return EngineOutcome(
-                reply, menu=self._menu_flag(), ui_actions=_ui_actions(interpretation)
+                format_llm_text(reply),
+                menu=self._menu_flag(),
+                ui_actions=_ui_actions(interpretation),
             )
 
         if intent in _TASK_INTENTS:
@@ -346,7 +349,9 @@ class ConversationEngine:
             "поставить задачу или найти что-то в базе?"
         )
         return EngineOutcome(
-            fallback, menu=self._menu_flag(), ui_actions=_ui_actions(interpretation)
+            format_llm_text(fallback),
+            menu=self._menu_flag(),
+            ui_actions=_ui_actions(interpretation),
         )
 
     # --- Предложение операций ---
@@ -693,7 +698,7 @@ class ConversationEngine:
             Flow.CLARIFY_DRAFT,
             data={"original": text, "intent": interpretation.intent},
         )
-        return EngineOutcome(asked)
+        return EngineOutcome(format_llm_text(asked))
 
     async def _handle_clarify(self, telegram_user_id: int, state, text: str) -> EngineOutcome:
         original = str(state.data.get("original", ""))
@@ -719,7 +724,9 @@ class ConversationEngine:
                 data={"original": combined, "intent": interpretation.intent},
             )
             return EngineOutcome(
-                interpretation.clarification_question or "Уточните, пожалуйста, детали."
+                format_llm_text(
+                    interpretation.clarification_question or "Уточните, пожалуйста, детали."
+                )
             )
         await self._store.clear(telegram_user_id)
         return await self._route(telegram_user_id, combined, interpretation, context)

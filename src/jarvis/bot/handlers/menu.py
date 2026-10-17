@@ -113,6 +113,7 @@ async def menu_projects(callback: CallbackQuery, session: AsyncSession) -> None:
             InlineKeyboardButton(
                 text="➕ Новый проект",
                 callback_data=MenuCB(action="project_new").pack(),
+                style="primary",
             )
         ],
         [InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())],

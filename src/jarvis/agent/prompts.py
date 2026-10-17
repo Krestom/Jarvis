@@ -7,10 +7,12 @@ from datetime import datetime
 from typing import Any
 
 from jarvis.agent.tools import ToolSpec
+from jarvis.ai.prompts import TELEGRAM_FORMAT_RULES
 
 _MAX_CONTEXT_SNIPPETS = 8
 
-SYSTEM_HEADER = """\
+SYSTEM_HEADER = (
+    """\
 Ты — Jarvis, личный ассистент владельца. Отвечай по-русски, кратко и по делу.
 У тебя есть инструменты для работы с РЕАЛЬНЫМИ данными приложения. Никогда не
 выдумывай задачи, проекты, записи или их содержимое: если данных не хватает —
@@ -69,7 +71,11 @@ UI-компоненты (опционально, только в reply):
   поиска и временные сетевые сбои.
 - Если инструмент вернул error — не повторяй тот же вызов с теми же аргументами;
   либо исправь аргументы, либо честно скажи пользователю, что не получилось.
+
+Формат поля text в reply:
 """
+    + TELEGRAM_FORMAT_RULES
+)
 
 
 def build_system_prompt(
