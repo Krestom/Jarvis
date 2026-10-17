@@ -103,7 +103,7 @@ class ImprovementService:
             correlation_id=correlation_id,
             extra={"evidence": hypothesis.evidence} if hypothesis.evidence else None,
         )
-        title = hypothesis.title.strip()[:300]
+        title = redact(hypothesis.title.strip()[:300])
         existing = await self._repo.find_open_by_signature(
             source=ImprovementSource.LLM_HYPOTHESIS, component=None, title=title
         )
@@ -112,7 +112,7 @@ class ImprovementService:
             await self._repo.register_occurrence(
                 existing,
                 correlation_id=correlation_id,
-                note=hypothesis.summary.strip()[:500] or None,
+                note=redact(hypothesis.summary.strip()[:500]) or None,
                 diagnostic_context=diagnostic,
             )
             return existing
@@ -122,7 +122,7 @@ class ImprovementService:
             source=ImprovementSource.LLM_HYPOTHESIS,
             confidence=hypothesis.confidence,
             title=title,
-            summary=hypothesis.summary.strip() or title,
+            summary=redact(hypothesis.summary.strip()) or title,
             correlation_id=correlation_id,
             app_version=__version__,
             diagnostic_context=diagnostic,

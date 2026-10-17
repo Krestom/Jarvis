@@ -43,7 +43,6 @@ from jarvis.domain.enums import (
     PendingOpType,
     PendingStatus,
     ProjectStatus,
-    Relation,
     SecretType,
     Sensitivity,
     TaskBucket,
@@ -280,40 +279,6 @@ class TaskComment(Base, TimestampMixin, SoftDeleteMixin):
     content: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (Index("ix_task_comments_task", "task_id", "created_at"),)
-
-
-# --- Связи -------------------------------------------------------------------
-
-
-class EntityLink(Base):
-    __tablename__ = "entity_links"
-
-    id: Mapped[uuid.UUID] = _uuid_pk()
-    from_type: Mapped[EntityType] = mapped_column(
-        _enum(EntityType, "entity_type"), nullable=False
-    )
-    from_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
-    to_type: Mapped[EntityType] = mapped_column(_enum(EntityType, "entity_type"), nullable=False)
-    to_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
-    relation: Mapped[Relation] = mapped_column(
-        _enum(Relation, "relation"), nullable=False, default=Relation.RELATES_TO
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "from_type",
-            "from_id",
-            "to_type",
-            "to_id",
-            "relation",
-            name="uq_entity_links_pair",
-        ),
-        Index("ix_entity_links_from", "from_type", "from_id"),
-        Index("ix_entity_links_to", "to_type", "to_id"),
-    )
 
 
 # --- Диалог и операции -------------------------------------------------------

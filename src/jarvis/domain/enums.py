@@ -100,15 +100,6 @@ class EntityType(StrEnum):
     CATEGORY = "category"
 
 
-class Relation(StrEnum):
-    RELATES_TO = "relates_to"
-    PART_OF = "part_of"
-    DEPENDS_ON = "depends_on"
-    DOCUMENTS = "documents"
-    DECIDED_BY = "decided_by"
-    REFERS_TO = "refers_to"
-
-
 class ImprovementCategory(StrEnum):
     FAILURE = "failure"
     MISSING_CAPABILITY = "missing_capability"
@@ -157,4 +148,3 @@ class PendingOpType(StrEnum):
     CREATE_SECRET = "create_secret"
     UPDATE_SECRET = "update_secret"
     DELETE_SECRET = "delete_secret"
-    CREATE_LINK = "create_link"

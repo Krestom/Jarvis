@@ -61,6 +61,7 @@ services:
       HEALTH_HOST: 0.0.0.0
     volumes:
       - jarvis-files:/data/documents
+      - jarvis-exports:/data/exports
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,6 +124,7 @@ services:
 volumes:
   jarvis-pgdata:
   jarvis-files:
+  jarvis-exports:
 
 networks:
   jarvis-net:

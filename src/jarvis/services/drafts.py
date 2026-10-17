@@ -14,10 +14,8 @@ from pydantic import BaseModel, Field
 
 from jarvis.domain.enums import (
     DocumentType,
-    EntityType,
     KnowledgeSource,
     KnowledgeType,
-    Relation,
     SecretType,
     Sensitivity,
     TaskBucket,
@@ -135,14 +133,6 @@ class ProjectDraft(BaseModel):
 class CategoryRename(BaseModel):
     category_id: uuid.UUID
     new_name: str = Field(min_length=1, max_length=120)
-
-
-class LinkDraft(BaseModel):
-    from_type: EntityType
-    from_id: uuid.UUID
-    to_type: EntityType
-    to_id: uuid.UUID
-    relation: Relation = Relation.RELATES_TO
 
 
 class EntityRef(BaseModel):

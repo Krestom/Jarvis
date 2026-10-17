@@ -8,15 +8,12 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from jarvis.domain.enums import (
-    EntityType,
     KnowledgeType,
-    Relation,
     Sensitivity,
     TaskBucket,
 )
 from jarvis.repositories.categories import DEFAULT_CATEGORIES, CategoryRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.links import LinkRepository
 from jarvis.repositories.processed_updates import ProcessedUpdateRepository
 from jarvis.repositories.tasks import TaskRepository
 
@@ -103,27 +100,6 @@ async def test_knowledge_sensitivity_filter(session):
 
     limited = await repo.search("сервер", allowed_sensitivities=[Sensitivity.NORMAL])
     assert [item.title for item in limited] == ["Обычное"]
-
-
-async def test_entity_links_bidirectional_and_idempotent(session):
-    tasks = TaskRepository(session)
-    knowledge = KnowledgeRepository(session)
-    links = LinkRepository(session)
-
-    task = await tasks.create(title="Задача со связью")
-    item = await knowledge.create(title="Контекст", content="контекст задачи")
-
-    await links.add(EntityType.TASK, task.id, EntityType.KNOWLEDGE, item.id, Relation.RELATES_TO)
-    await links.add(EntityType.TASK, task.id, EntityType.KNOWLEDGE, item.id, Relation.RELATES_TO)
-
-    from_task = await links.list_for(EntityType.TASK, task.id)
-    assert len(from_task) == 1
-    assert from_task[0].entity_id == item.id
-
-    from_knowledge = await links.list_for(EntityType.KNOWLEDGE, item.id)
-    assert len(from_knowledge) == 1
-    assert from_knowledge[0].entity_id == task.id
-    assert from_knowledge[0].outbound is False
 
 
 async def test_processed_updates_dedup(session):

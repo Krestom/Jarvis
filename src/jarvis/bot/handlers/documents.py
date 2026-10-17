@@ -25,11 +25,10 @@ from jarvis.config.settings import Settings
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
 from jarvis.documents.storage import EncryptedFileStorage
-from jarvis.domain.enums import EntityType, PendingOpType
+from jarvis.domain.enums import PendingOpType
 from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
-from jarvis.repositories.links import LinkRepository
 from jarvis.services.catalog import CatalogService
 from jarvis.services.documents import DocumentService
 from jarvis.services.errors import OperationError
@@ -206,20 +205,6 @@ async def document_action(
             PendingOpType.DELETE_DOCUMENT,
             {"entity_id": str(document_id)},
         )
-        return
-
-    if callback_data.action == "related":
-        await callback.answer()
-        links = await LinkRepository(session).list_for(EntityType.DOCUMENT, document_id)
-        if not links:
-            await callback.message.answer("Связанных записей нет.")
-            return
-        lines = ["🔗 <b>Связанные записи</b>"]
-        for link in links:
-            lines.append(
-                f"• {link.entity_type.value}: <code>{link.entity_id}</code> ({link.relation.value})"
-            )
-        await callback.message.answer("\n".join(lines))
         return
 
     await callback.answer("Неизвестное действие", show_alert=True)

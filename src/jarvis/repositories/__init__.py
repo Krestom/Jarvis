@@ -8,7 +8,6 @@ from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.improvements import ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.links import LinkedEntity, LinkRepository
 from jarvis.repositories.pending import PendingOperationRepository, ResolutionOutcome
 from jarvis.repositories.processed_updates import ProcessedUpdateRepository
 from jarvis.repositories.projects import ProjectRepository
@@ -24,8 +23,6 @@ __all__ = [
     "DocumentRepository",
     "ImprovementRepository",
     "KnowledgeRepository",
-    "LinkRepository",
-    "LinkedEntity",
     "PendingOperationRepository",
     "ProcessedUpdateRepository",
     "ProjectRepository",

@@ -99,6 +99,8 @@ sudo usermod -aG docker "$USER"   # затем перелогиниться
    | `AI_PROVIDER` | `none` — работа без AI; `fake` — детерминированный режим для проверки; строки настройки внешних провайдеров — см. таблицу переменных в `.env.example` |
    | `TRANSCRIPTION_PROVIDER` | `none` (по умолчанию) или `openai_compatible` + `TRANSCRIPTION_BASE_URL`, `TRANSCRIPTION_API_KEY`, `TRANSCRIPTION_MODEL` |
    | `MCP_AUTH_TOKEN` | случайный токен для MCP-доступа (нужен, если используется MCP) |
+   | `MCP_INCLUDE_SENSITIVE` | `true` — чувствительные заметки видны MCP (решение владельца); секреты не отдаются никогда |
+   | `WEB_SEARCH_PROVIDER` / `TAVILY_API_KEY` | `tavily` + ключ для веб-поиска агента |
    | `APP_TIMEZONE` | таймзона для «сегодня»/«на этой неделе», по умолчанию `Europe/Moscow` |
 
    Свой user id проще всего узнать, написав @userinfobot в Telegram: он вернёт
@@ -343,8 +345,8 @@ MCP-сервис слушает `127.0.0.1:8765` на сервере (в compose
 4. Проверка: `opencode mcp list` должен показать linked `connected`.
    Быстрая проверка самого MCP (до OpenCode): `python scripts/check_mcp.py` —
    без токена ожидается `401`, с токеном из `.env` — `200` и имя сервера.
-   MCP — read-only доступ; `MCP_INCLUDE_SENSITIVE=false` по умолчанию закрывает
-   чувствительные данные, секреты не отдаются никогда.
+   MCP — read-only доступ; `MCP_INCLUDE_SENSITIVE=true` (решение владельца
+   17.10.2026) отдаёт MCP чувствительные заметки, секреты не отдаются никогда.
 
 ## 7. Бэкапы
 

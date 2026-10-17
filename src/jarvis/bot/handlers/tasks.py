@@ -26,11 +26,10 @@ from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.preview import fmt_dt_local
 from jarvis.conversation.state import ConversationStore
-from jarvis.domain.enums import EntityType, PendingOpType, TaskBucket
+from jarvis.domain.enums import PendingOpType, TaskBucket
 from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
-from jarvis.repositories.links import LinkRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.catalog import CatalogService
 from jarvis.services.tasks import TaskService
@@ -283,21 +282,6 @@ async def task_action(
         outcome = await engine.choose_task_for_comment(user_id, str(task.id))
         await callback.answer()
         await send_outcome(callback.message, outcome)
-        return
-
-    if action == "related":
-        await callback.answer()
-        links = await LinkRepository(session).list_for(EntityType.TASK, task.id)
-        if not links:
-            await callback.message.answer("Связанных записей нет.")
-            return
-        lines = ["🔗 <b>Связанные записи</b>"]
-        for link in links:
-            lines.append(
-                f"• {link.entity_type.value}: <code>{link.entity_id}</code> "
-                f"({link.relation.value})"
-            )
-        await callback.message.answer("\n".join(lines))
         return
 
     await callback.answer("Неизвестное действие", show_alert=True)

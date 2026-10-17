@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import socket
 
 import httpx
@@ -14,10 +13,9 @@ from sqlalchemy import func, select
 
 from jarvis.config.settings import Settings
 from jarvis.db.models import AuditLog
-from jarvis.domain.enums import EntityType, KnowledgeType, Relation, Sensitivity
+from jarvis.domain.enums import KnowledgeType, Sensitivity
 from jarvis.mcp.server import create_mcp_http_app, create_mcp_server
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.links import LinkRepository
 from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import SecretCreateDraft
@@ -57,25 +55,17 @@ async def test_mcp_tools_respect_policy(test_settings, session_factory, session)
         sensitivity=Sensitivity.SENSITIVE,
     )
     project = await ProjectRepository(session).create(name="Jarvis", description="Личная ОС")
-    task = await TaskRepository(session).create(title="Настроить MCP", project_id=project.id)
+    await TaskRepository(session).create(title="Настроить MCP", project_id=project.id)
 
     secrets_service = SecretService(session, test_settings)
     encrypted_b64, key_version = secrets_service.encrypt_value("super-secret-token")
-    secret_id = await secrets_service.create_from_draft(
+    await secrets_service.create_from_draft(
         SecretCreateDraft(
             name="Токен MCP",
             secret_type="api_token",
             encrypted_value_b64=encrypted_b64,
             key_version=key_version,
         )
-    )
-
-    links = LinkRepository(session)
-    await links.add(
-        EntityType.PROJECT, project.id, EntityType.TASK, task.id, Relation.RELATES_TO
-    )
-    await links.add(
-        EntityType.SECRET, secret_id, EntityType.PROJECT, project.id, Relation.RELATES_TO
     )
     await session.commit()
 
@@ -95,17 +85,10 @@ async def test_mcp_tools_respect_policy(test_settings, session_factory, session)
     result = await call_tool(server, "get_knowledge_item", {"item_id": str(instruction.id)})
     assert result["content"] == "Как выкатить релиз на сервер"
 
-    # 4. Секреты недоступны: в поиске и в связях.
+    # 4. Секреты недоступны: их значения не находятся поиском.
     result = await call_tool(server, "search_knowledge", {"query": "super-secret-token"})
     assert result["count"] == 0
-
-    result = await call_tool(server, "find_related", {
-        "entity_type": "project", "entity_id": str(project.id)
-    })
-    related_types = {item["type"] for item in result["results"]}
-    assert "task" in related_types
-    assert "secret" not in related_types
-    assert "super-secret-token" not in json.dumps(result)
+    assert result["results"] == []
 
     # 5. Контекст проекта.
     result = await call_tool(server, "get_project_context", {"project_name": "jarvis"})
@@ -128,10 +111,9 @@ async def test_mcp_tools_respect_policy(test_settings, session_factory, session)
     result = await call_tool(open_server, "get_knowledge_item", {"item_id": str(sensitive.id)})
     assert result["title"] == "Личная переписка"
 
-    result = await call_tool(open_server, "find_related", {
-        "entity_type": "project", "entity_id": str(project.id)
-    })
-    assert "secret" not in {item["type"] for item in result["results"]}
+    # Секреты не отдаются никогда: значение не находится даже поиском.
+    result = await call_tool(open_server, "search_knowledge", {"query": "super-secret-token"})
+    assert result["count"] == 0
 
 
 async def test_mcp_http_requires_bearer_token(test_settings, session_factory):

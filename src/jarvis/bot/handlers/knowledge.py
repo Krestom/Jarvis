@@ -13,9 +13,8 @@ from jarvis.bot.handlers.render import send_search_results
 from jarvis.bot.keyboards import PAGE_SIZE, knowledge_list_keyboard, main_menu
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import EngineOutcome
-from jarvis.domain.enums import EntityType, PendingOpType
+from jarvis.domain.enums import PendingOpType
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.links import LinkRepository
 from jarvis.services.search import SearchService
 
 
@@ -99,20 +98,6 @@ async def knowledge_action(
             PendingOpType.DELETE_KNOWLEDGE,
             {"entity_id": str(item_id)},
         )
-        return
-
-    if callback_data.action == "related":
-        await callback.answer()
-        links = await LinkRepository(session).list_for(EntityType.KNOWLEDGE, item_id)
-        if not links:
-            await callback.message.answer("Связанных записей нет.")
-            return
-        lines = ["🔗 <b>Связанные записи</b>"]
-        for link in links:
-            lines.append(
-                f"• {link.entity_type.value}: <code>{link.entity_id}</code> ({link.relation.value})"
-            )
-        await callback.message.answer("\n".join(lines))
         return
 
     await callback.answer("Неизвестное действие", show_alert=True)

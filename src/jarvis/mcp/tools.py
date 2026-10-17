@@ -19,12 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis.config.settings import Settings
 from jarvis.db.session import session_scope
-from jarvis.domain.enums import EntityType, KnowledgeType, Sensitivity
+from jarvis.domain.enums import KnowledgeType, Sensitivity
 from jarvis.repositories.audit import AuditRepository
 from jarvis.repositories.categories import CategoryRepository
-from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.links import LinkRepository
 from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.knowledge import allowed_sensitivities
@@ -98,26 +96,6 @@ class _Serializer:
             "due_at": task.due_at.isoformat() if task.due_at else None,
             "updated_at": task.updated_at.isoformat() if task.updated_at else None,
         }
-
-    async def entity_title(self, entity_type: EntityType, entity_id: uuid.UUID) -> str | None:
-        """Заголовок соседней сущности; None — недоступно по политике."""
-        if entity_type == EntityType.KNOWLEDGE:
-            item = await KnowledgeRepository(self._session).get(entity_id)
-            if item is None or item.sensitivity not in self._allowed:
-                return None
-            return item.title
-        if entity_type == EntityType.TASK:
-            task = await TaskRepository(self._session).get(entity_id)
-            return task.title if task else None
-        if entity_type == EntityType.PROJECT:
-            project = await ProjectRepository(self._session).get(entity_id)
-            return project.name if project else None
-        if entity_type == EntityType.DOCUMENT:
-            document = await DocumentRepository(self._session).get(entity_id)
-            if document is None or document.sensitivity not in self._allowed:
-                return None
-            return document.title  # только метаданные, без содержимого
-        return None  # секреты не раскрываются никогда
 
 
 def register_tools(
@@ -252,44 +230,4 @@ def register_tools(
             serializer = _Serializer(session, allowed)
             results = [serializer.task(task) for task in tasks]
             await _audit(session, "search_tasks", len(results))
-            return {"count": len(results), "results": results}
-
-    @server.tool(
-        name="find_related",
-        title="Связанные записи",
-        description=(
-            "Найти записи, связанные с задачей, знанием или проектом "
-            "(entity_type: task, knowledge, project; entity_id — UUID)."
-        ),
-    )
-    async def find_related(entity_type: str, entity_id: str) -> dict[str, Any]:
-        """Связи сущности с безопасными заголовками соседей."""
-        parsed = _parse_uuid(entity_id)
-        if parsed is None:
-            return {"error": "invalid_id"}
-        normalized = (entity_type or "").strip().lower()
-        if normalized not in ("task", "knowledge", "project"):
-            return {
-                "error": "unsupported_entity_type",
-                "supported": ["task", "knowledge", "project"],
-            }
-        async with session_scope(session_factory) as session:
-            links = await LinkRepository(session).list_for(
-                EntityType(normalized), parsed
-            )
-            serializer = _Serializer(session, allowed)
-            results = []
-            for link in links:
-                title = await serializer.entity_title(link.entity_type, link.entity_id)
-                if title is None:
-                    continue  # недоступно по политике — не подтверждаем существование
-                results.append(
-                    {
-                        "type": link.entity_type.value,
-                        "id": str(link.entity_id),
-                        "title": title,
-                        "relation": link.relation.value,
-                    }
-                )
-            await _audit(session, "find_related", len(results))
             return {"count": len(results), "results": results}

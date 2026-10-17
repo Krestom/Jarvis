@@ -231,18 +231,13 @@ def task_card_keyboard(task_id: str, status: str, comments_count: int = 0) -> In
     )
     builder.add(
         InlineKeyboardButton(
-            text="🔗 Связи", callback_data=TaskCB(action="related", task_id=task_id).pack()
-        )
-    )
-    builder.add(
-        InlineKeyboardButton(
             text="🗑 Удалить", callback_data=TaskCB(action="delete", task_id=task_id).pack()
         )
     )
     builder.row(
         InlineKeyboardButton(text="📋 К спискам", callback_data=MenuCB(action="tasks").pack())
     )
-    builder.adjust(2, 2, 1, 1, 1)
+    builder.adjust(2, 2, 1, 1)
     return builder.as_markup()
 
 
@@ -385,18 +380,13 @@ def knowledge_card_keyboard(item_id: str) -> InlineKeyboardMarkup:
     )
     builder.add(
         InlineKeyboardButton(
-            text="🔗 Связи", callback_data=KbCB(action="related", item_id=item_id).pack()
-        )
-    )
-    builder.add(
-        InlineKeyboardButton(
             text="🗑 Удалить", callback_data=KbCB(action="delete", item_id=item_id).pack()
         )
     )
     builder.row(
         InlineKeyboardButton(text="📚 К списку", callback_data=MenuCB(action="knowledge").pack())
     )
-    builder.adjust(2, 2, 1)
+    builder.adjust(2, 2)
     return builder.as_markup()
 
 
@@ -495,18 +485,13 @@ def document_card_keyboard(doc_id: str, *, can_download: bool) -> InlineKeyboard
     )
     builder.add(
         InlineKeyboardButton(
-            text="🔗 Связи", callback_data=DocCB(action="related", doc_id=doc_id).pack()
-        )
-    )
-    builder.add(
-        InlineKeyboardButton(
             text="🗑 Удалить", callback_data=DocCB(action="delete", doc_id=doc_id).pack()
         )
     )
     builder.row(
         InlineKeyboardButton(text="📄 К списку", callback_data=MenuCB(action="documents").pack())
     )
-    builder.adjust(2, 1, 1, 1)
+    builder.adjust(2, 1, 1)
     return builder.as_markup()
 
 

@@ -6,9 +6,8 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.config.settings import Settings
-from jarvis.domain.enums import EntityType, PendingOpType, Relation
+from jarvis.domain.enums import EntityType, PendingOpType
 from jarvis.repositories.categories import CategoryRepository
-from jarvis.repositories.links import LinkRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import (
     CategoryDraft,
@@ -18,7 +17,6 @@ from jarvis.services.drafts import (
     EntityRef,
     KnowledgeDraft,
     KnowledgeUpdate,
-    LinkDraft,
     ProjectDraft,
     SecretCreateDraft,
     SecretUpdate,
@@ -141,13 +139,6 @@ async def apply_operation(
             EntityType.CATEGORY, category.id, f"Категория переименована: {rename.new_name}"
         )
 
-    if operation_type == PendingOpType.CREATE_LINK:
-        draft = LinkDraft.model_validate(payload)
-        await LinkRepository(session).add(
-            draft.from_type, draft.from_id, draft.to_type, draft.to_id, draft.relation
-        )
-        return AppliedOperation(None, None, "Связь создана")
-
     if operation_type == PendingOpType.SAVE_DOCUMENT:
         from jarvis.documents.storage import EncryptedFileStorage
         from jarvis.services.documents import DocumentService
@@ -220,4 +211,4 @@ def utcnow() -> datetime:
 
 
 # Реэкспорт для удобства вызовов из engine/handlers.
-__all__ = ["AppliedOperation", "apply_operation", "utcnow", "Relation"]
+__all__ = ["AppliedOperation", "apply_operation", "utcnow"]

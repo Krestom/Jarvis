@@ -162,9 +162,11 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 
 ## 4. Модель данных
 
-Таблицы из `src/jarvis/db/models.py` (одна Alembic-миграция:
-`alembic/versions/8e374da5e984_initial_schema.py`). Enum-поля хранятся как VARCHAR
-без CHECK-ограничений — значения валидируются на уровне Python.
+Таблицы из `src/jarvis/db/models.py` (миграции Alembic: `8e374da5e984` — initial
+schema, `19d82c1a6e02` — improvement backlog, `1905d3d87297` — комментарии задач,
+`02df923727b6` — журнал чата, `aa624e0c3fc4` — журнал уведомлений,
+`b7f3c1a2d4e6` — drop entity_links). Enum-поля хранятся как VARCHAR без
+CHECK-ограничений — значения валидируются на уровне Python.
 
 | Таблица | Назначение | Ключевые поля |
 |---|---|---|
@@ -175,7 +177,7 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 | `task_comments` | Комментарии к задачам | `task_id` (FK, CASCADE), `content` |
 | `documents` | Метаданные документов (содержимое — только на диске, зашифровано) | `title`, `document_type`, `sensitivity`, `status` (pending/active), `storage_key` (unique), `original_filename`, `mime_type`, `size_bytes`, `sha256`, `encryption_version` |
 | `secrets` | Секреты (значение зашифровано) | `name` (unique), `secret_type`, `encrypted_value` (blob), `key_version`, `project_id`, `category_id` |
-| `entity_links` | Полиморфные связи сущностей | `from_type/from_id`, `to_type/to_id`, `relation`, уникальность пары |
+| `entity_links` | ~~Полиморфные связи сущностей~~ — удалено (фича «Связи»: создать связь было неоткуда, таблица всегда пустая; миграция `b7f3c1a2d4e6`) |
 | `conversation_states` | Краткосрочный контекст сценария | PK `telegram_user_id`, `flow`, `step`, `data` (JSONB), `pending_operation_id`, `expires_at`; при `flow='agent_context'` в `data` лежат выбранная сущность агента, кандидаты и метрики последнего запроса |
 | `pending_operations` | Предложенные значимые изменения | `telegram_user_id`, `operation_type`, `payload` (JSONB), `status`, `expires_at`, `resolved_at`, `result` |
 | `audit_log` | Журнал значимых изменений (без чувствительного содержимого) | `actor`, `action`, `entity_type/id`, `result`, `meta`, `created_at` |
@@ -248,13 +250,13 @@ MCP (`src/jarvis/mcp/`) — отдельный процесс (`python -m jarvis
 (streamable HTTP). Политика — **read-only**:
 
 - инструменты: `search_knowledge`, `search_instructions`, `get_knowledge_item`,
-  `get_project_context`, `search_tasks`, `find_related`
+  `get_project_context`, `search_tasks`
   (`src/jarvis/mcp/tools.py`);
 - каждый вызов проходит через те же репозитории и тот же фильтр
   чувствительности, что и Telegram-бот (`allowed_sensitivities` в
-  `src/jarvis/services/knowledge.py`): по умолчанию отдаются только уровни
-  `normal`, `MCP_INCLUDE_SENSITIVE=true` добавляет `sensitive`, уровень
-  `secret` не отдаётся никогда;
+  `src/jarvis/services/knowledge.py`): `MCP_INCLUDE_SENSITIVE=true` (решение
+  владельца 17.10.2026) отдаёт MCP и уровень `sensitive` — чувствительные
+  заметки видны и агенту Telegram, и MCP; уровень `secret` не отдаётся никогда;
 - секреты, содержимое документов, файловая система, shell и SQL недоступны;
   инструменты не различают «не найдено» и «запрещено», чтобы не подтверждать
   существование закрытых записей;
