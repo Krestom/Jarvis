@@ -41,8 +41,15 @@ def build_storage(settings: Settings) -> EncryptedFileStorage:
 
 
 async def send_documents_list(
-    message: Message, session: AsyncSession, *, page: int, category: str = ""
+    message: Message,
+    session: AsyncSession,
+    *,
+    page: int,
+    category: str = "",
+    edit: bool = False,
 ) -> None:
+    from jarvis.bot.handlers.render import send_or_edit
+
     category_id = parse_hex_uuid(category)
     category_obj = (
         await CategoryRepository(session).get(category_id) if category_id else None
@@ -58,12 +65,14 @@ async def send_documents_list(
     title = f"🗂 <b>{esc(category_obj.name)}</b>" if category_obj else "📄 <b>Документы</b>"
     if not documents and page == 0:
         if category_obj is not None:
-            await message.answer(f"{title}\n\nПусто.")
+            await send_or_edit(message, f"{title}\n\nПусто.", edit=edit)
             return
-        await message.answer(
+        await send_or_edit(
+            message,
             "📄 Пока нет документов.\n\nОтправьте файл одним сообщением — "
             "я зашифрую его и предложу сохранить.",
-            reply_markup=main_menu(),
+            markup=main_menu(),
+            edit=edit,
         )
         return
     lines = [title, ""]
@@ -72,20 +81,24 @@ async def send_documents_list(
     markup = documents_list_keyboard(
         documents, page, has_next=len(documents) >= PAGE_SIZE, category=category
     )
-    for chunk in split_message("\n".join(lines)):
-        await message.answer(chunk)
-    await message.answer("Выберите документ:", reply_markup=markup)
+    await send_or_edit(
+        message, "\n".join(lines) + "\n\nВыберите документ:", markup=markup, edit=edit
+    )
 
 
 async def documents_page(
     callback: CallbackQuery, callback_data: DocListCB, session: AsyncSession
 ) -> None:
+    from jarvis.bot.handlers.render import send_or_edit
+
     await callback.answer()
     if callback_data.category == "*":
         categories = await CatalogService(session).list_categories()
-        await callback.message.answer(
+        await send_or_edit(
+            callback.message,
             "🗂 <b>Документы по категориям</b>",
-            reply_markup=document_categories_keyboard(categories),
+            markup=document_categories_keyboard(categories),
+            edit=True,
         )
         return
     await send_documents_list(
@@ -93,6 +106,7 @@ async def documents_page(
         session,
         page=callback_data.page,
         category=callback_data.category,
+        edit=True,
     )
 
 

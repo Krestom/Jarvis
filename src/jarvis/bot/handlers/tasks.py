@@ -12,7 +12,7 @@ from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import TaskCB, TaskListCB, uuid_hex
 from jarvis.bot.formatting import esc, split_message, task_line
 from jarvis.bot.handlers.open_entity import parse_hex_uuid, render_task_card
-from jarvis.bot.handlers.render import propose_and_send, send_outcome
+from jarvis.bot.handlers.render import propose_and_send, send_or_edit, send_outcome
 from jarvis.bot.keyboards import (
     PAGE_SIZE,
     bucket_keyboard,
@@ -97,9 +97,7 @@ async def send_task_list(
     message: Message, session: AsyncSession, settings: Settings, *, view: str, page: int
 ) -> None:
     text, markup = await build_task_list(session, settings, view, page)
-    for chunk in split_message(text):
-        await message.answer(chunk)
-    await message.answer("Выберите задачу:", reply_markup=markup)
+    await send_or_edit(message, f"{text}\n\nВыберите задачу:", markup=markup)
 
 
 async def task_list(
@@ -108,27 +106,20 @@ async def task_list(
     if callback_data.view == "category" and not callback_data.value:
         categories = await CatalogService(session).list_categories()
         await callback.answer()
-        try:
-            await callback.message.edit_text("🗂 <b>Задачи по категориям</b>")
-        except Exception:  # noqa: BLE001 - сообщение могло быть недоступно для правки
-            await callback.message.answer("🗂 <b>Задачи по категориям</b>")
-        await callback.message.answer(
-            "Выберите категорию:", reply_markup=task_categories_keyboard(categories)
+        await send_or_edit(
+            callback.message,
+            "🗂 <b>Задачи по категориям</b>",
+            markup=task_categories_keyboard(categories),
+            edit=True,
         )
         return
     text, markup = await build_task_list(
         session, settings, callback_data.view, callback_data.page, callback_data.value
     )
     await callback.answer()
-    chunks = split_message(text)
-    try:
-        await callback.message.edit_text(chunks[0])
-        for chunk in chunks[1:]:
-            await callback.message.answer(chunk)
-        await callback.message.answer("Выберите задачу:", reply_markup=markup)
-    except Exception:  # noqa: BLE001 - сообщение могло быть недоступно для правки
-        await callback.message.answer(chunks[0])
-        await callback.message.answer("Выберите задачу:", reply_markup=markup)
+    await send_or_edit(
+        callback.message, f"{text}\n\nВыберите задачу:", markup=markup, edit=True
+    )
 
 
 async def task_action(

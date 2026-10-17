@@ -28,6 +28,7 @@ EMPTY_SEARCH_TEXT = "Ничего не нашёл. Уточните запрос
 log = logging.getLogger(__name__)
 
 _PARSE_ERROR_MARKER = "can't parse entities"
+_NOT_MODIFIED_MARKER = "message is not modified"
 _TAG_RE = re.compile(r"</?[a-zA-Z][^>]{0,80}>")
 
 
@@ -44,6 +45,37 @@ async def answer_safe(message: Message, text: str, **kwargs) -> None:
             raise
         log.warning("telegram rejected html in outgoing message, sending plain text")
         await message.answer(_TAG_RE.sub("", text), parse_mode=None, **kwargs)
+
+
+async def send_or_edit(
+    message: Message, text: str, *, markup=None, edit: bool = False
+) -> None:
+    """Страница списка: при листании правим текущее сообщение, а не шлём новое.
+
+    Клавиатура крепится к последнему чанку; если правка недоступна (или текст
+    не изменился) — тихий фолбэк на новое сообщение.
+    """
+    chunks = split_message(text)
+    last_index = len(chunks) - 1
+    if edit:
+        try:
+            await message.edit_text(
+                chunks[0], reply_markup=markup if last_index == 0 else None
+            )
+        except TelegramBadRequest as error:
+            if _NOT_MODIFIED_MARKER in str(error):
+                return
+            log.warning("telegram rejected list edit, sending new message")
+        else:
+            for index, extra in enumerate(chunks[1:], start=1):
+                await answer_safe(
+                    message, extra, reply_markup=markup if index == last_index else None
+                )
+            return
+    for index, chunk in enumerate(chunks):
+        await answer_safe(
+            message, chunk, reply_markup=markup if index == last_index else None
+        )
 
 
 async def propose_and_send(
@@ -100,6 +132,35 @@ async def send_outcome(
         await message.answer("Действия:", reply_markup=card_markup)
         return
 
+    # Экраны-списки (задачи/документы/знания): одна страница — одно сообщение,
+    # чтобы пагинация правила его на месте, а не слала новое при каждом шаге.
+    list_markup = None
+    list_prompt = None
+    if outcome.task_page is not None:
+        from jarvis.bot.keyboards import task_list_keyboard
+
+        view, page, value, has_next = outcome.task_page
+        list_markup = task_list_keyboard(outcome.task_choices, view, page, has_next, value)
+        list_prompt = outcome.task_choices_prompt or "Выберите задачу:"
+    elif outcome.documents:
+        from jarvis.bot.keyboards import PAGE_SIZE, documents_list_keyboard
+
+        list_markup = documents_list_keyboard(
+            outcome.documents, 0, has_next=len(outcome.documents) >= PAGE_SIZE
+        )
+        list_prompt = "Выберите документ:"
+    elif outcome.knowledge:
+        from jarvis.bot.keyboards import PAGE_SIZE, knowledge_list_keyboard
+
+        list_markup = knowledge_list_keyboard(
+            outcome.knowledge, 0, has_next=len(outcome.knowledge) >= PAGE_SIZE
+        )
+        list_prompt = "Выберите запись:"
+    if list_markup is not None:
+        text = f"{outcome.text}\n\n{list_prompt}" if outcome.text else list_prompt
+        await send_or_edit(message, text, markup=list_markup)
+        return
+
     markup = None
     if outcome.awaiting_document or outcome.awaiting_secret:
         markup = cancel_flow_keyboard()
@@ -129,43 +190,10 @@ async def send_outcome(
         await answer_safe(message, preview, reply_markup=confirm_keyboard(op_id))
 
     if outcome.task_choices:
-        if outcome.task_page is not None:
-            from jarvis.bot.keyboards import task_list_keyboard
-
-            view, page, value, has_next = outcome.task_page
-            await message.answer(
-                outcome.task_choices_prompt or "Выберите задачу:",
-                reply_markup=task_list_keyboard(
-                    outcome.task_choices, view, page, has_next, value
-                ),
-            )
-        else:
-            await message.answer(
-                outcome.task_choices_prompt or "Выберите задачу:",
-                reply_markup=comment_target_keyboard(
-                    outcome.task_choices, action=outcome.task_choices_action
-                ),
-            )
-
-    # Экран «Документы»: настоящие кнопки карточек (как в /documents).
-    if outcome.documents:
-        from jarvis.bot.keyboards import PAGE_SIZE, documents_list_keyboard
-
         await message.answer(
-            "Выберите документ:",
-            reply_markup=documents_list_keyboard(
-                outcome.documents, 0, has_next=len(outcome.documents) >= PAGE_SIZE
-            ),
-        )
-
-    # Экран «Знания»: настоящие кнопки карточек (как в меню «Знания»).
-    if outcome.knowledge:
-        from jarvis.bot.keyboards import PAGE_SIZE, knowledge_list_keyboard
-
-        await message.answer(
-            "Выберите запись:",
-            reply_markup=knowledge_list_keyboard(
-                outcome.knowledge, 0, has_next=len(outcome.knowledge) >= PAGE_SIZE
+            outcome.task_choices_prompt or "Выберите задачу:",
+            reply_markup=comment_target_keyboard(
+                outcome.task_choices, action=outcome.task_choices_action
             ),
         )
 
@@ -176,17 +204,22 @@ async def send_outcome(
         )
 
 
-async def send_search_results(message: Message, outcome: EngineOutcome) -> None:
+async def send_search_results(
+    message: Message, outcome: EngineOutcome, *, edit: bool = False
+) -> None:
     hits = outcome.search_hits
     query = outcome.search_query or ""
     if not hits:
         if outcome.search_page > 0:
-            await message.answer("Больше результатов нет.", reply_markup=main_menu())
+            await send_or_edit(
+                message, "Больше результатов нет.", markup=main_menu(), edit=edit
+            )
             return
-        await answer_safe(
+        await send_or_edit(
             message,
             f"{EMPTY_SEARCH_TEXT}\n\n<i>Запрос: {esc(query)}</i>",
-            reply_markup=main_menu(),
+            markup=main_menu(),
+            edit=edit,
         )
         return
 
@@ -198,10 +231,8 @@ async def send_search_results(message: Message, outcome: EngineOutcome) -> None:
         kind_emoji = {"knowledge": "📚", "task": "✅", "document": "📄"}.get(hit.kind, "•")
         snippet = f" — <i>{esc(hit.snippet)}</i>" if hit.snippet else ""
         lines.append(f"{index}. {kind_emoji} {esc(hit.title)}{snippet}")
-    text = "\n".join(lines)
+    text = "\n".join(lines) + "\n\nВыберите запись, чтобы открыть:"
     markup = search_results_keyboard(
         hits, query, outcome.search_page, has_next=len(hits) >= PAGE_SIZE
     )
-    for chunk in split_message(text):
-        await answer_safe(message, chunk)
-    await message.answer("Выберите запись, чтобы открыть:", reply_markup=markup)
+    await send_or_edit(message, text, markup=markup, edit=edit)

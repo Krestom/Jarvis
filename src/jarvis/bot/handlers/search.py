@@ -15,7 +15,7 @@ from jarvis.bot.handlers.open_entity import (
     render_knowledge_card,
     render_task_card,
 )
-from jarvis.bot.handlers.render import send_outcome
+from jarvis.bot.handlers.render import send_search_results
 from jarvis.bot.keyboards import main_menu
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
@@ -32,7 +32,8 @@ async def search_action(
         engine = ConversationEngine(session, settings, ai)
         outcome = await engine.search_page(callback.from_user.id, callback_data.page)
         await callback.answer()
-        await send_outcome(callback.message, outcome, session, settings)
+        # Листание правит то же сообщение, а не присылает новую страницу.
+        await send_search_results(callback.message, outcome, edit=True)
         return
 
     if callback_data.action == "open":

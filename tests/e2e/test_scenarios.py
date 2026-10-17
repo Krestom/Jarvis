@@ -930,13 +930,19 @@ async def test_scenario_tasks_by_category(classic_settings, session_factory, ses
     messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
     menu_message = keyboard_messages(messages)[-1]
 
+    # Навигация правит то же сообщение, новых не шлёт.
     picked_category = await harness.click_button(
         DEFAULT_USER_ID, menu_message, "По категориям"
     )
-    categories_message = keyboard_messages(picked_category)[-1]
+    assert picked_category == []
+    categories_message = harness.current(menu_message)
+    assert "Задачи по категориям" in (categories_message.text or "")
+
     picked = await harness.click_button(DEFAULT_USER_ID, categories_message, "Рабочие")
-    assert picked  # прислано «Выберите задачу:»
-    assert "Отчёт по УВ" in (harness.current(categories_message).text or "")
+    assert picked == []
+    list_view = harness.current(menu_message)
+    assert "Отчёт по УВ" in (list_view.text or "")
+    assert "Выберите задачу:" in (list_view.text or "")
 
 
 # 23. Меню задач: месяц вместо Inbox и «Когда-нибудь».
@@ -988,13 +994,16 @@ async def test_scenario_document_category_flow(classic_settings, session_factory
     category = await CategoryRepository(session).find_by_name("Работа")
     assert document.category_id == category.id
 
-    # Просмотр по категории показывает документ.
+    # Просмотр по категории: навигация правит то же сообщение.
     messages = await harness.send_text(DEFAULT_USER_ID, "/documents")
     list_message = keyboard_messages(messages)[-1]
     category_list = await harness.click_button(
         DEFAULT_USER_ID, list_message, "По категориям"
     )
-    category_menu = keyboard_messages(category_list)[-1]
+    assert category_list == []
+    category_menu = harness.current(list_message)
+    assert "Документы по категориям" in (category_menu.text or "")
+
     filtered = await harness.click_button(DEFAULT_USER_ID, category_menu, "Работа")
-    combined = " ".join(m.text or "" for m in filtered)
-    assert "passport" in combined
+    assert filtered == []
+    assert "passport" in (harness.current(list_message).text or "")

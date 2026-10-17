@@ -18,29 +18,37 @@ from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.services.search import SearchService
 
 
-async def send_knowledge_list(message: Message, session: AsyncSession, *, page: int) -> None:
+async def send_knowledge_list(
+    message: Message, session: AsyncSession, *, page: int, edit: bool = False
+) -> None:
+    from jarvis.bot.handlers.render import send_or_edit
+
     repo = KnowledgeRepository(session)
     items = await repo.list_recent(limit=PAGE_SIZE, offset=page * PAGE_SIZE)
     if not items and page == 0:
-        await message.answer(
+        await send_or_edit(
+            message,
             "📚 Пока пусто. Напишите заметку — я предложу её сохранить.",
-            reply_markup=main_menu(),
+            markup=main_menu(),
+            edit=edit,
         )
         return
     lines = ["📚 <b>Знания</b> (последние записи)", ""]
     for index, item in enumerate(items, start=1):
         lines.append(f"{index}. {item.title}")
     markup = knowledge_list_keyboard(items, page, has_next=len(items) >= PAGE_SIZE)
-    for chunk in split_message("\n".join(lines)):
-        await message.answer(chunk)
-    await message.answer("Выберите запись:", reply_markup=markup)
+    await send_or_edit(
+        message, "\n".join(lines) + "\n\nВыберите запись:", markup=markup, edit=edit
+    )
 
 
 async def knowledge_page(
     callback: CallbackQuery, callback_data: KbListCB, session: AsyncSession
 ) -> None:
     await callback.answer()
-    await send_knowledge_list(callback.message, session, page=callback_data.page)
+    await send_knowledge_list(
+        callback.message, session, page=callback_data.page, edit=True
+    )
 
 
 async def knowledge_action(

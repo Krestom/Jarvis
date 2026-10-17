@@ -713,8 +713,9 @@ async def test_agent_pages_task_list_by_seven(test_settings, session_factory, se
     assert len(first_page) == 7  # на странице ровно 7
     list_message = keyboard_messages(messages)[-1]
 
-    # «➡️» правит то же сообщение (edit_text) — читаем актуальную версию.
+    # «➡️» правит то же сообщение и НЕ шлёт новое.
     next_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "➡️")
+    assert next_messages == []
     page_two = harness.current(list_message).text or ""
     second_page = set(re.findall(r"Задача \d\d", page_two))
     assert len(second_page) == 2
@@ -722,9 +723,10 @@ async def test_agent_pages_task_list_by_seven(test_settings, session_factory, se
     assert first_page | second_page == all_titles
     assert not (first_page & second_page)  # страницы не пересекаются
 
-    page_two_message = keyboard_messages(next_messages)[-1]
-    await harness.click_button(DEFAULT_USER_ID, page_two_message, "⬅️")
-    page_back = harness.current(page_two_message).text or ""
+    # «⬅️» правит это же сообщение обратно.
+    back_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "⬅️")
+    assert back_messages == []
+    page_back = harness.current(list_message).text or ""
     assert set(re.findall(r"Задача \d\d", page_back)) == first_page
 
 
