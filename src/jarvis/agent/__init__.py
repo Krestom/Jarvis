@@ -7,7 +7,7 @@ from jarvis.agent.budget import (
     LoopDetected,
     RequestCancelled,
 )
-from jarvis.agent.orchestrator import AgentResult, AgentService, default_gate
+from jarvis.agent.orchestrator import AgentResult, AgentService
 from jarvis.agent.queue import QueueTimeout, RequestHandle, UserSessionGate
 from jarvis.agent.routing import (
     AGENT_FLOW,
@@ -31,7 +31,6 @@ __all__ = [
     "RequestHandle",
     "UserSessionGate",
     "build_profile",
-    "default_gate",
     "detect_profile",
     "invokes_jarvis",
 ]

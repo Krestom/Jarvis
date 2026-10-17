@@ -82,7 +82,8 @@ _DATE_LIST_PREFIX = re.compile(r"(?i)^\s*(какие|что|выведи|пок�
 @dataclass
 class EngineOutcome:
     text: str
-    pending_op_id: str | None = None
+    # (id операции, текст превью) — на каждую операцию отдельное сообщение с кнопками.
+    pending_ops: list[tuple[str, str]] = field(default_factory=list)
     search_hits: list[SearchHit] = field(default_factory=list)
     search_query: str | None = None
     search_page: int = 0
@@ -95,6 +96,7 @@ class EngineOutcome:
     entity_choice_prompt: str | None = None
     task_choices: list = field(default_factory=list)
     task_choices_action: str = "comment_choose"
+    task_choices_prompt: str | None = None
 
 
 class ConversationEngine:
@@ -540,12 +542,12 @@ class ConversationEngine:
             if task.due_at is not None:
                 suffix = f" — до {fmt_dt_local(task.due_at, self._settings.tz)}"
             lines.append(f"{index}. {html_escape(task.title)}{suffix}")
-        lines.append("")
-        lines.append(
-            "<i>Откройте карточку задачи в /tasks, чтобы изменить её "
-            "или добавить комментарий.</i>"
+        return EngineOutcome(
+            "\n".join(lines),
+            task_choices=list(tasks),
+            task_choices_action="view",
+            task_choices_prompt="Нажмите на задачу, чтобы открыть карточку:",
         )
-        return EngineOutcome("\n".join(lines))
 
     async def _show_comments(self, interpretation: Interpretation) -> EngineOutcome:
         """Комментарии к задаче («какие комментарии у меня к задаче X»)."""
@@ -599,7 +601,7 @@ class ConversationEngine:
         preview = await render_preview(
             self._session, operation_type, payload, self._settings.tz
         )
-        return EngineOutcome(preview, pending_op_id=operation_id)
+        return EngineOutcome("", pending_ops=[(operation_id, preview)])
 
     # --- Stage 3: агент ---
 
@@ -625,16 +627,38 @@ class ConversationEngine:
                 "Не получилось выполнить агентский запрос. Попробуйте ещё раз позже.",
                 menu=self._menu_flag(),
             )
+        pending_ops = await self._pending_previews(result.pending_operation_ids)
         return EngineOutcome(
             result.text,
-            pending_op_id=result.pending_operation_id,
+            pending_ops=pending_ops,
             ui_actions=result.quick_actions,
             entity_choices=[
                 candidate.model_dump(mode="json") for candidate in result.entity_choices
             ],
             entity_choice_prompt=result.choice_prompt,
-            menu=self._menu_flag() and not result.quick_actions,
+            menu=self._menu_flag() and not result.quick_actions and not pending_ops,
         )
+
+    async def _pending_previews(self, operation_ids: list[str]) -> list[tuple[str, str]]:
+        """Превью каждой предложенной агентом операции (id → текст с кнопками)."""
+        if not operation_ids:
+            return []
+        from jarvis.repositories.pending import PendingOperationRepository
+
+        repo = PendingOperationRepository(self._session)
+        previews: list[tuple[str, str]] = []
+        for operation_id in operation_ids:
+            operation = await repo.get(uuid.UUID(str(operation_id)))
+            if operation is None:
+                continue
+            preview = await render_preview(
+                self._session,
+                operation.operation_type,
+                operation.payload,
+                self._settings.tz,
+            )
+            previews.append((str(operation_id), preview))
+        return previews
 
     # --- Improvement backlog ---
 
@@ -764,6 +788,17 @@ class ConversationEngine:
                 draft["title"] = first_line(text) or draft.get("title", "Заметка")
             draft["content"] = text
             draft["original_text"] = text
+        elif op_kind == PendingOpType.UPDATE_KNOWLEDGE.value:
+            changes = dict(draft.get("changes") or {})
+            if entities.get("title"):
+                changes["title"] = str(entities["title"])[:300]
+            if entities.get("summary"):
+                changes["summary"] = str(entities["summary"])[:2000]
+            if entities.get("content"):
+                changes["content"] = str(entities["content"])[:8000]
+            elif text.strip():
+                changes["content"] = text[:8000]
+            draft["changes"] = changes
         elif op_kind == PendingOpType.SAVE_DOCUMENT.value:
             draft["title"] = text.strip()[:300] or draft.get("title", "Документ")
         elif op_kind == PendingOpType.CREATE_SECRET.value:
@@ -802,6 +837,13 @@ class ConversationEngine:
             return await self._propose(
                 telegram_user_id, PendingOpType.CREATE_KNOWLEDGE, draft_model
             )
+        if op_kind == PendingOpType.UPDATE_KNOWLEDGE.value:
+            payload = {"item_id": draft.get("item_id"), "changes": draft.get("changes") or {}}
+            if not payload["item_id"] or not payload["changes"]:
+                return EngineOutcome("Не удалось обновить операцию. Начните заново.")
+            return await self._propose_payload(
+                telegram_user_id, PendingOpType.UPDATE_KNOWLEDGE, payload
+            )
         if op_kind == PendingOpType.SAVE_DOCUMENT.value:
             from jarvis.services.drafts import DocumentDraft
 
@@ -812,7 +854,10 @@ class ConversationEngine:
 
             draft_model = SecretCreateDraft.model_validate({**draft})
             return await self._propose(telegram_user_id, PendingOpType.CREATE_SECRET, draft_model)
-        return EngineOutcome("Не удалось обновить операцию. Начните заново.")
+        return EngineOutcome(
+            "Отменил предыдущую операцию. Чтобы её изменить — "
+            "сформулируйте запрос заново."
+        )
 
     async def start_edit_pending(self, telegram_user_id: int, operation_id: str) -> None:
         """Запустить сценарий «Изменить» для pending-операции."""

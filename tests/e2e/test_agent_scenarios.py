@@ -178,11 +178,14 @@ async def test_agent_entity_choice_updates_conversation_context(
             args={"task_id": str(task_b), "content": "Проверил конфигурацию"},
         )
     )
-    ai.queue_plan(PlanStep(type="reply", text="Комментарий добавлен."))
+    ai.queue_plan(PlanStep(type="reply", text="Подготовил комментарий — подтвердите кнопкой."))
     messages = await harness.send_text(DEFAULT_USER_ID, "Добавь комментарий: проверил конфигурацию")
-    assert any("Комментарий добавлен." in (m.text or "") for m in messages)
+    assert any("Подготовил комментарий" in (m.text or "") for m in messages)
     assert any("Выбранная ранее сущность" in call for call in ai.plan_calls)
+    # До подтверждения комментария нет.
+    assert await TaskCommentRepository(session).list_for_task(task_b) == []
 
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
     await session.commit()
     session.expire_all()
     comments = await TaskCommentRepository(session).list_for_task(task_b)
@@ -213,6 +216,88 @@ async def test_agent_delete_requires_button_confirmation(
     await session.commit()
     session.expire_all()
     assert await TaskRepository(session).get(task_id) is None
+
+
+async def test_agent_updates_knowledge_note_with_confirmation(
+    test_settings, session_factory, session
+):
+    """Агент правит заметку (в т.ч. чувствительную) — превью + кнопка."""
+    from jarvis.domain.enums import KnowledgeSource, KnowledgeType, Sensitivity
+
+    item = await KnowledgeRepository(session).create(
+        type=KnowledgeType.NOTE,
+        title="Пароль от сервера",
+        content="старый пароль",
+        source_type=KnowledgeSource.TEXT,
+        sensitivity=Sensitivity.SENSITIVE,
+    )
+    await session.commit()
+
+    ai = FakeProvider()
+    ai.queue_plan(PlanStep(type="tool_call", tool="get_knowledge", args={"item_id": str(item.id)}))
+    ai.queue_plan(
+        PlanStep(
+            type="tool_call",
+            tool="update_knowledge",
+            args={"item_id": str(item.id), "content": "новый пароль"},
+        )
+    )
+    ai.queue_plan(PlanStep(type="reply", text="Обновил заметку — подтвердите кнопкой."))
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, "Джарвис, в заметке про сервер поменяй пароль"
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Изменить запись?" in combined  # превью операции
+    assert "старый пароль" in " ".join(call for call in ai.plan_calls)  # агент видит sensitive
+    # До подтверждения содержимое прежнее.
+    assert (await KnowledgeRepository(session).get(item.id)).content == "старый пароль"
+
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    session.expire_all()
+    items = await KnowledgeRepository(session).list_recent()
+    assert len(items) == 1
+    assert items[0].content == "новый пароль"
+    assert items[0].sensitivity == Sensitivity.SENSITIVE
+
+
+async def test_agent_multiple_operations_each_get_a_button(
+    test_settings, session_factory, session
+):
+    """Две мутации в одном запросе — два превью с кнопками (ни одна не теряется)."""
+    task_id = await TaskService(session).create_from_draft(TaskDraft(title="Существующая"))
+    await session.commit()
+
+    ai = FakeProvider()
+    ai.queue_plan(
+        PlanStep(
+            type="tool_call",
+            tool="add_comment",
+            args={"task_id": str(task_id), "content": "первый"},
+        )
+    )
+    ai.queue_plan(PlanStep(type="tool_call", tool="create_task", args={"title": "Новая задача"}))
+    ai.queue_plan(PlanStep(type="reply", text="Подготовил две операции."))
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, "Джарвис, добавь комментарий и создай задачу"
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Добавить комментарий?" in combined
+    assert "Создать задачу?" in combined
+    keyboards = keyboard_messages(messages)
+    assert len(keyboards) == 2  # на каждую операцию — свои кнопки
+
+    for keyboard in keyboards:
+        await harness.click_button(DEFAULT_USER_ID, keyboard, "Подтвердить")
+    await session.commit()
+    session.expire_all()
+    comments = await TaskCommentRepository(session).list_for_task(task_id)
+    assert [comment.content for comment in comments] == ["первый"]
+    assert await TaskRepository(session).search("Новая задача")
 
 
 async def test_agent_quick_actions_keyboard_from_reply(    test_settings, session_factory, session

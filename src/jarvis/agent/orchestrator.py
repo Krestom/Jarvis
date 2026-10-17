@@ -38,16 +38,6 @@ log = logging.getLogger(__name__)
 MESSAGES_CHAR_BUDGET = 60000
 PARTIAL_TEMPLATE = "Не успел довести до конца ({reason}). Что удалось выяснить: {findings}"
 
-_default_gate: UserSessionGate | None = None
-
-
-def default_gate(settings: Settings) -> UserSessionGate:
-    """Процесс-local очередь по умолчанию (см. agent/queue.py)."""
-    global _default_gate
-    if _default_gate is None:
-        _default_gate = UserSessionGate(settings)
-    return _default_gate
-
 
 @dataclass
 class AgentResult:
@@ -59,7 +49,7 @@ class AgentResult:
     llm_calls: int = 0
     tokens: int | None = None
     duration_ms: int = 0
-    pending_operation_id: str | None = None
+    pending_operation_ids: list[str] = field(default_factory=list)
     quick_actions: list[str] = field(default_factory=list)
     entity_choices: list[EntityCandidate] = field(default_factory=list)
     choice_prompt: str | None = None
@@ -75,14 +65,14 @@ class AgentService:
         settings: Settings,
         ai: AIProvider,
         *,
-        gate: UserSessionGate | None = None,
+        gate: UserSessionGate,
         search_provider: WebSearchProvider | None = None,
         correlation_id: str | None = None,
     ) -> None:
         self._session = session
         self._settings = settings
         self._ai = ai
-        self._gate = gate or default_gate(settings)
+        self._gate = gate
         self._search_provider = search_provider or create_search_provider(settings)
         self._correlation_id = correlation_id
         self._store = ConversationStore(ConversationRepository(session), settings)
@@ -231,7 +221,7 @@ class AgentService:
         result.tool_calls = budget.tool_calls
         result.llm_calls = budget.llm_calls
         result.tokens = budget.tokens if budget.has_usage_data else None
-        result.pending_operation_id = registry.pending_operation_id
+        result.pending_operation_ids = list(registry.pending_operation_ids)
         result.surfaced = registry.surfaced
         if not result.text:
             result.text = "Не получилось сформулировать ответ. Попробуйте переформулировать запрос."
@@ -363,12 +353,16 @@ class AgentService:
     async def _save_context(self, telegram_user_id: int, result: AgentResult) -> None:
         stored = await self._stored_context(telegram_user_id)
         # Показывали entity_choice — сохраняем его; иначе всё, что нашли за запрос.
+        # Пустой результат (занятая очередь, отмена) не стирает прежний контекст:
+        # «добавь к первой» должен ссылаться на задачи прошлого успешного запроса.
         candidates = result.entity_choices or result.surfaced
         data = {
             **stored,
             "agent_candidates": [
                 candidate.model_dump(mode="json") for candidate in candidates
-            ],
+            ]
+            if candidates
+            else stored.get("agent_candidates", []),
             "agent_last_run": {
                 "profile": result.profile,
                 "termination": result.termination,
@@ -424,4 +418,4 @@ def _trim_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
     return [*head, *tail]
 
 
-__all__ = ["AgentResult", "AgentService", "default_gate"]
+__all__ = ["AgentResult", "AgentService"]

@@ -29,7 +29,7 @@ def make_service(session, test_settings, ai, gate=None) -> AgentService:
         session,
         test_settings,
         ai,
-        gate=gate,
+        gate=gate or UserSessionGate(test_settings),
         search_provider=NoneSearchProvider(),
         correlation_id="test",
     )
@@ -277,8 +277,54 @@ async def test_agent_delete_task_returns_pending_operation(session, test_setting
     service = make_service(session, test_settings, ai)
 
     result = await service.run(USER, "Джарвис, удали задачу")
-    assert result.pending_operation_id is not None
+    assert result.pending_operation_ids
     assert await TaskRepository(session).get(task_id) is not None  # ещё не удалена
+
+
+async def test_agent_create_task_proposes_confirmation(session, test_settings):
+    ai = FakeProvider()
+    ai.queue_plan(PlanStep(type="tool_call", tool="create_task", args={"title": "Купить хлеб"}))
+    ai.queue_plan(PlanStep(type="reply", text="Подготовил задачу — подтвердите кнопкой."))
+    service = make_service(session, test_settings, ai)
+
+    result = await service.run(USER, "Джарвис, создай задачу купить хлеб")
+    assert result.pending_operation_ids
+    # Задача ещё не создана: ждёт кнопки пользователя.
+    assert await TaskRepository(session).search("Купить хлеб") == []
+
+
+async def test_agent_queue_timeout_keeps_previous_context(session, test_settings):
+    await TaskService(session).create_from_draft(TaskDraft(title="Починить сервер"))
+    ai = FakeProvider()
+    ai.queue_plan(PlanStep(type="tool_call", tool="list_tasks", args={"view": "no_group"}))
+    ai.queue_plan(PlanStep(type="reply", text="Нашёл задачу."))
+    gate = UserSessionGate(test_settings)
+    await make_service(session, test_settings, ai, gate=gate).run(USER, "Джарвис, задачи?")
+
+    store = ConversationStore(ConversationRepository(session), test_settings)
+    state = await store.get_active(USER)
+    assert state.data["agent_candidates"]
+
+    # Занятая очередь не должна стирать контекст прошлого успешного запроса.
+    test_settings.agent_queue_wait_seconds = 0.05
+    hold = asyncio.Event()
+
+    async def blocker() -> None:
+        async with gate.acquire(USER):
+            await hold.wait()
+
+    blocker_task = asyncio.create_task(blocker())
+    await asyncio.sleep(0.01)
+    busy = FakeProvider()
+    result = await make_service(session, test_settings, busy, gate=gate).run(
+        USER, "Джарвис, ты занят?"
+    )
+    assert result.termination == "queue_timeout"
+    hold.set()
+    await blocker_task
+
+    state = await store.get_active(USER)
+    assert state.data["agent_candidates"]  # кандидаты уцелели
 
 
 async def test_agent_quick_actions_ui_passthrough(session, test_settings):

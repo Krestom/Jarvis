@@ -93,7 +93,6 @@ OPERATION_TITLES = {
     PendingOpType.CREATE_SECRET: "Сохранить секрет?",
     PendingOpType.UPDATE_SECRET: "Изменить секрет?",
     PendingOpType.DELETE_SECRET: "Удалить секрет?",
-    PendingOpType.CREATE_LINK: "Создать связь?",
 }
 
 
@@ -229,6 +228,19 @@ async def render_preview(
         preview = content if len(content) <= 300 else content[:299] + "…"
         lines.append(f"\n<i>{html.escape(preview)}</i>")
 
+    elif operation_type == PendingOpType.UPDATE_KNOWLEDGE:
+        item = None
+        item_id = payload.get("item_id")
+        try:
+            item = await KnowledgeRepository(session).get(uuid.UUID(str(item_id)))
+        except (ValueError, TypeError):
+            item = None
+        if item is None:
+            lines.append("Запись не найдена.\n")
+        else:
+            lines.append(_line("Запись", item.title))
+            lines.append(_render_knowledge_changes(item, payload.get("changes", {})))
+
     elif operation_type == PendingOpType.SAVE_DOCUMENT:
         lines.append(_line("Название", payload.get("title")))
         dtype = payload.get("document_type", DocumentType.OTHER.value)
@@ -288,6 +300,34 @@ async def render_preview(
 
     lines.append("\nПодтвердите или отмените операцию.")
     return "".join(line for line in lines if line)
+
+
+def _render_knowledge_changes(item, changes: dict) -> str:
+    """Изменения записи знаний: старое → новое (превью UPDATE_KNOWLEDGE)."""
+    parts = []
+    if "title" in changes:
+        old_title = item.title
+        new_title = str(changes["title"])
+        parts.append(f"заголовок: <i>{html.escape(old_title)}</i> → {html.escape(new_title)}")
+    if "summary" in changes:
+        old = (item.summary or "нет")[:120]
+        new = str(changes["summary"] or "нет")[:120]
+        parts.append(f"сводка: <i>{html.escape(old)}</i> → {html.escape(new)}")
+    if "content" in changes:
+        old = item.content[:120] if item.content else "нет"
+        new = str(changes["content"] or "нет")[:120]
+        parts.append(f"текст: <i>{html.escape(old)}</i> → {html.escape(new)}")
+    if "sensitivity" in changes:
+        old = SENSITIVITY_LABELS.get(item.sensitivity, item.sensitivity)
+        new = SENSITIVITY_LABELS.get(Sensitivity(changes["sensitivity"]), changes["sensitivity"])
+        parts.append(f"чувствительность: <i>{old}</i> → {new}")
+    if "category_id" in changes:
+        parts.append("категория будет изменена")
+    if "project_id" in changes:
+        parts.append("проект будет изменён")
+    if not parts:
+        return "<i>Нет изменений.</i>"
+    return "\n".join(f"• {part}" for part in parts)
 
 
 def _render_task_changes(task, changes: dict, tz: ZoneInfo) -> str:

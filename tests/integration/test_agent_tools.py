@@ -84,25 +84,43 @@ async def test_list_tasks_on_date_and_category_and_create_category(session, test
 
     created = await registry.call("create_category", {"name": "Дом"})
     assert created.ok is True
+    assert created.data["status"] == "confirmation_required"
+    assert registry.pending_operation_ids
+
     again = await registry.call("create_category", {"name": "дом"})
     assert again.ok is True
-    assert again.data["category_id"] == created.data["category_id"]
+    assert again.data["status"] == "confirmation_required"
+    assert again.data["note"] == (
+        "категория уже предложена на подтверждение ранее в этом диалоге"
+    )
+    # Второго предложения не появилось.
+    assert len(registry.pending_operation_ids) == 1
 
 
 async def test_create_task_with_category(session, test_settings):
     from jarvis.repositories.categories import CategoryRepository
+    from jarvis.services.confirmation import ConfirmationService
 
     category = await CategoryRepository(session).create("Рабочие")
     registry = make_registry(session, test_settings)
 
     result = await registry.call("create_task", {"title": "Согласовать", "category": "Рабочие"})
     assert result.ok is True
-    task = await TaskRepository(session).get(uuid.UUID(result.data["task"]["id"]))
-    assert task.category_id == category.id
+    assert result.data["status"] == "confirmation_required"
+    # До подтверждения задачи нет.
+    assert await TaskRepository(session).search("Согласовать") == []
 
     missing = await registry.call("create_task", {"title": "X", "category": "Нет"})
     assert missing.ok is False
     assert missing.error_kind == "not_found"
+
+    # Подтверждение создаёт задачу с категорией.
+    outcome = await ConfirmationService(session, test_settings).confirm(
+        USER, registry.pending_operation_ids[0]
+    )
+    assert outcome.ok is True
+    tasks = await TaskRepository(session).search("Согласовать")
+    assert tasks and tasks[0].category_id == category.id
 
 
 async def test_validation_not_found_and_unknown_tool_errors(session, test_settings):
@@ -123,31 +141,111 @@ async def test_validation_not_found_and_unknown_tool_errors(session, test_settin
 
 
 async def test_mutations_go_through_domain_services(session, test_settings):
+    from jarvis.services.confirmation import ConfirmationService
+
     registry = make_registry(session, test_settings)
     repo = TaskRepository(session)
+    confirmation = ConfirmationService(session, test_settings)
+    task_id = await TaskService(session).create_from_draft(TaskDraft(title="Готовая задача"))
 
-    created = await registry.call(
-        "create_task",
-        {"title": "Обновить инфраструктуру", "project": "SuperSport", "priority": "high"},
-    )
-    assert created.ok is True
-    task_id = uuid.UUID(created.data["task"]["id"])
-    task = await repo.get(task_id)
-    assert task is not None and task.title == "Обновить инфраструктуру"
-    assert await ProjectRepository(session).find_by_name("SuperSport") is not None
-
-    updated = await registry.call(
-        "update_task", {"task_id": str(task_id), "status": "done"}
-    )
+    updated = await registry.call("update_task", {"task_id": str(task_id), "status": "done"})
     assert updated.ok is True
-    assert updated.data["task"]["status"] == TaskStatus.DONE.value
+    assert updated.data["status"] == "confirmation_required"
+    assert (await repo.get(task_id)).status != TaskStatus.DONE  # ещё не применено
 
     commented = await registry.call(
         "add_comment", {"task_id": str(task_id), "content": "Проверил конфигурацию"}
     )
     assert commented.ok is True
+    assert commented.data["status"] == "confirmation_required"
+
+    # Каждая операция ждёт своей кнопки; подтверждаем обе.
+    assert len(registry.pending_operation_ids) == 2
+    for op_id in registry.pending_operation_ids:
+        outcome = await confirmation.confirm(USER, op_id)
+        assert outcome.ok is True
+
+    task = await repo.get(task_id)
+    assert task.status == TaskStatus.DONE
     comments = await TaskCommentRepository(session).list_for_task(task_id)
     assert [comment.content for comment in comments] == ["Проверил конфигурацию"]
+
+    # Проект создаётся при применении create_task (как в детерминированном пути).
+    created = await registry.call(
+        "create_task",
+        {"title": "Обновить инфраструктуру", "project": "SuperSport", "priority": "high"},
+    )
+    assert created.ok is True
+    outcome = await confirmation.confirm(USER, registry.pending_operation_ids[-1])
+    assert outcome.ok is True
+    assert await ProjectRepository(session).find_by_name("SuperSport") is not None
+
+
+async def test_update_task_can_clear_due_date(session, test_settings):
+    from datetime import UTC, datetime, timedelta
+
+    from jarvis.services.confirmation import ConfirmationService
+
+    due = datetime.now(UTC) + timedelta(days=3)
+    task_id = await TaskService(session).create_from_draft(TaskDraft(title="Со сроком", due_at=due))
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call("update_task", {"task_id": str(task_id), "due_at": None})
+    assert result.ok is True
+    assert result.data["status"] == "confirmation_required"
+
+    outcome = await ConfirmationService(session, test_settings).confirm(
+        USER, registry.pending_operation_ids[0]
+    )
+    assert outcome.ok is True
+    assert (await TaskRepository(session).get(task_id)).due_at is None
+
+
+async def test_update_knowledge_tool_edits_even_sensitive_notes(session, test_settings):
+    from jarvis.domain.enums import KnowledgeSource, KnowledgeType, Sensitivity
+    from jarvis.services.confirmation import ConfirmationService
+
+    repo = KnowledgeRepository(session)
+    item = await repo.create(
+        type=KnowledgeType.NOTE,
+        title="Пароль от сервера",
+        content="старый пароль",
+        source_type=KnowledgeSource.TEXT,
+        sensitivity=Sensitivity.SENSITIVE,
+    )
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call(
+        "update_knowledge",
+        {
+            "item_id": str(item.id),
+            "title": "Пароль от сервера (обновлён)",
+            "content": "новый пароль",
+        },
+    )
+    assert result.ok is True
+    assert result.data["status"] == "confirmation_required"
+    # До подтверждения содержимое не менялось.
+    assert (await repo.get(item.id)).content == "старый пароль"
+
+    outcome = await ConfirmationService(session, test_settings).confirm(
+        USER, registry.pending_operation_ids[0]
+    )
+    assert outcome.ok is True
+    updated = await repo.get(item.id)
+    assert updated.title == "Пароль от сервера (обновлён)"
+    assert updated.content == "новый пароль"
+    assert updated.sensitivity == Sensitivity.SENSITIVE
+
+    # Ошибки: несуществующая запись, пустые изменения, неизвестная категория.
+    missing = await registry.call("update_knowledge", {"item_id": str(uuid.uuid4())})
+    assert missing.ok is False and missing.error_kind == "not_found"
+    empty = await registry.call("update_knowledge", {"item_id": str(item.id)})
+    assert empty.ok is False and empty.error_kind == "validation"
+    bad_category = await registry.call(
+        "update_knowledge", {"item_id": str(item.id), "category": "Нет такой"}
+    )
+    assert bad_category.ok is False and bad_category.error_kind == "not_found"
 
 
 async def test_delete_task_only_sends_confirmation(session, test_settings):
@@ -157,7 +255,7 @@ async def test_delete_task_only_sends_confirmation(session, test_settings):
     result = await registry.call("delete_task", {"task_id": str(task_id)})
     assert result.ok is True
     assert result.data["status"] == "confirmation_required"
-    assert registry.pending_operation_id is not None
+    assert registry.pending_operation_ids
 
     # Задача не удалена: ждём подтверждения пользователя.
     assert await TaskRepository(session).get(task_id) is not None
@@ -272,13 +370,13 @@ async def test_create_knowledge_tool_needs_confirmation_and_flags_secrets(
     assert result.ok is True
     assert result.data["status"] == "confirmation_required"
     assert result.data["sensitivity"] == "sensitive"  # определили креды сами
-    assert registry.pending_operation_id is not None
+    assert registry.pending_operation_ids
 
     # До подтверждения записи нет.
     assert await KnowledgeRepository(session).list_recent() == []
 
     confirmation = ConfirmationService(session, test_settings)
-    outcome = await confirmation.confirm(USER, registry.pending_operation_id)
+    outcome = await confirmation.confirm(USER, registry.pending_operation_ids[0])
     assert outcome.ok is True
 
     items = await KnowledgeRepository(session).list_recent()

@@ -70,26 +70,29 @@ async def send_outcome(message: Message, outcome: EngineOutcome) -> None:
         return
 
     markup = None
-    if outcome.pending_op_id:
-        markup = confirm_keyboard(outcome.pending_op_id)
-    elif outcome.awaiting_document or outcome.awaiting_secret:
+    if outcome.awaiting_document or outcome.awaiting_secret:
         markup = cancel_flow_keyboard()
     elif outcome.force_save:
         markup = force_save_keyboard()
     elif outcome.ui_actions:
         markup = quick_actions_keyboard(outcome.ui_actions)
-    if markup is None and outcome.menu:
+    elif outcome.menu:
         markup = main_menu()
 
-    chunks = split_message(outcome.text or "…")
-    for index, chunk in enumerate(chunks):
-        await answer_safe(
-            message, chunk, reply_markup=markup if index == len(chunks) - 1 else None
-        )
+    if outcome.text or not outcome.pending_ops:
+        chunks = split_message(outcome.text or "…")
+        for index, chunk in enumerate(chunks):
+            await answer_safe(
+                message, chunk, reply_markup=markup if index == len(chunks) - 1 else None
+            )
+
+    # Каждая предложенная операция — отдельное превью с кнопками подтверждения.
+    for op_id, preview in outcome.pending_ops:
+        await answer_safe(message, preview, reply_markup=confirm_keyboard(op_id))
 
     if outcome.task_choices:
         await message.answer(
-            "Выберите задачу:",
+            outcome.task_choices_prompt or "Выберите задачу:",
             reply_markup=comment_target_keyboard(
                 outcome.task_choices, action=outcome.task_choices_action
             ),

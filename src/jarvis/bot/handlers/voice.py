@@ -9,6 +9,7 @@ from aiogram import F, Router
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jarvis.agent.queue import UserSessionGate
 from jarvis.ai import AIProvider
 from jarvis.bot.handlers.render import send_outcome
 from jarvis.config.settings import Settings
@@ -31,6 +32,8 @@ async def voice_message(
     settings: Settings,
     ai: AIProvider,
     transcription: TranscriptionProvider | None,
+    agent_gate: UserSessionGate,
+    search_provider=None,
 ) -> None:
     voice = message.voice
     if voice is None:
@@ -47,6 +50,8 @@ async def voice_message(
         downloadable=voice,
         filename="voice.ogg",
         mime_type=voice.mime_type,
+        agent_gate=agent_gate,
+        search_provider=search_provider,
     )
 
 
@@ -56,6 +61,8 @@ async def audio_message(
     settings: Settings,
     ai: AIProvider,
     transcription: TranscriptionProvider | None,
+    agent_gate: UserSessionGate,
+    search_provider=None,
 ) -> None:
     audio = message.audio
     if audio is None:
@@ -72,6 +79,8 @@ async def audio_message(
         downloadable=audio,
         filename=audio.file_name or "audio.mp3",
         mime_type=audio.mime_type,
+        agent_gate=agent_gate,
+        search_provider=search_provider,
     )
 
 
@@ -85,6 +94,8 @@ async def _transcribe_and_handle(
     downloadable,
     filename: str,
     mime_type: str | None,
+    agent_gate: UserSessionGate,
+    search_provider=None,
 ) -> None:
     if transcription is None:
         await message.answer(NO_TRANSCRIPTION_TEXT)
@@ -118,7 +129,9 @@ async def _transcribe_and_handle(
         source="voice",
         correlation_id=get_correlation_id(),
     )
-    engine = ConversationEngine(session, settings, ai)
+    engine = ConversationEngine(
+        session, settings, ai, gate=agent_gate, search_provider=search_provider
+    )
     outcome = await engine.handle_text(
         message.from_user.id, transcript, source=KnowledgeSource.VOICE
     )
