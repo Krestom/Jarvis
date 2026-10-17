@@ -84,7 +84,18 @@ class EntityChoice(BaseModel):
     prompt: str | None = Field(default=None, max_length=200)
 
 
-AgentUI = Annotated[EntityChoice | UIRequest, Field(discriminator="component")]
+class ScreenRequest(BaseModel):
+    """Открыть детерминированный экран приложения (backend строит кнопки сам).
+
+    Каталог экранов — allow-list; параметры валидируются на сервере.
+    """
+
+    component: Literal["screen"]
+    name: Literal["tasks", "search"]
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+AgentUI = Annotated[EntityChoice | UIRequest | ScreenRequest, Field(discriminator="component")]
 
 
 class PlanStep(BaseModel):

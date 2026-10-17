@@ -224,27 +224,22 @@ class ConversationEngine:
             )
 
         # --- Stage 3: AI-агент ---
-        # Обращение по имени и продолжение агентского контекста имеют приоритет
-        # над поиском, эвристиками и fallback'ами (но не над пошаговыми
-        # сценариями выше — их нельзя сбивать).
-        if self._agent_enabled():
-            from jarvis.agent.routing import AGENT_FLOW, invokes_jarvis, mentions_backlog
+        # Весь текст уходит агенту (кроме пошаговых сценариев выше и ввода
+        # запроса для кнопочного поиска — его ловит состояние SEARCH_WAIT).
+        from jarvis.agent.routing import invokes_jarvis
 
-            if state is not None and state.flow == AGENT_FLOW:
-                return await self._run_agent(telegram_user_id, text)
-            if invokes_jarvis(text) or mentions_backlog(text):
-                return await self._run_agent(telegram_user_id, text)
-
-        # Поиск ждёт ввод только пока пользователь его не ввёл (step=asked).
-        # Когда результаты уже показаны (step=results), обычный текст
-        # обрабатывается как раньше — состояние нужно лишь для пагинации.
         if (
             state is not None
             and state.flow == Flow.SEARCH_WAIT
             and state.step == "asked"
+            and not (self._agent_enabled() and invokes_jarvis(text))
         ):
             return await self._do_search(telegram_user_id, text, page=0)
 
+        if self._agent_enabled():
+            return await self._run_agent(telegram_user_id, text)
+
+        # Без AI — прежний детерминированный путь (деградированный режим).
         day = self._date_list_day(text)
         if day is not None:
             return await self._show_tasks_on_date(day)
@@ -392,6 +387,7 @@ class ConversationEngine:
             )
 
         category = await self._catalog.resolve_name(entities.get("category"))
+        category_name = str(entities.get("category") or "").strip() or None
         project_name = str(entities.get("project") or "").strip() or None
         bucket = self._parse_bucket(entities.get("bucket"))
         priority = self._parse_priority(entities.get("priority"))
@@ -404,6 +400,8 @@ class ConversationEngine:
             bucket=bucket,
             priority=priority,
             category_id=category.id if category else None,
+            # Категория названа, но её ещё нет: привяжем по имени — создастся при подтверждении.
+            category_name=category_name if category is None else None,
             project_name=project_name,
         )
         return await self._propose(telegram_user_id, PendingOpType.CREATE_TASK, draft)
@@ -524,6 +522,20 @@ class ConversationEngine:
         )
         return await self._propose(telegram_user_id, PendingOpType.CREATE_KNOWLEDGE, draft)
 
+    async def _render_screen(
+        self, telegram_user_id: int, name: str, params: dict
+    ) -> EngineOutcome | None:
+        """Экран, который попросил открыть агент (параметры уже провалидированы)."""
+        if name == "tasks":
+            if params.get("category"):
+                return await self._show_tasks_in_category(str(params["category"]))
+            if params.get("on_date"):
+                return await self._show_tasks_on_date(params["on_date"])
+            return await self._show_task_list(str(params.get("view") or "week"))
+        if name == "search":
+            return await self._do_search(telegram_user_id, str(params.get("query") or ""), page=0)
+        return None
+
     async def _show_task_list(self, view: str) -> EngineOutcome:
         """Список задач по динамической группе («какие у меня задачи на неделю»)."""
         if view not in TASK_VIEWS:
@@ -543,6 +555,18 @@ class ConversationEngine:
             day, tz=self._settings.tz, limit=TASK_LIST_LIMIT
         )
         return self._render_task_list(f"📋 <b>Задачи на {day.strftime('%d.%m.%Y')}</b>", tasks)
+
+    async def _show_tasks_in_category(self, name: str) -> EngineOutcome:
+        """Список задач категории («покажи задачи в категории X»)."""
+        category = await self._catalog.resolve_name(name)
+        if category is None:
+            return EngineOutcome(
+                f"Категория «{html_escape(name)}» не найдена.", menu=self._menu_flag()
+            )
+        tasks = await TaskRepository(self._session).list_by_category(
+            category.id, limit=TASK_LIST_LIMIT
+        )
+        return self._render_task_list(f"📋 <b>Задачи в «{html_escape(category.name)}»</b>", tasks)
 
     def _render_task_list(self, title: str, tasks) -> EngineOutcome:
         if not tasks:
@@ -681,6 +705,12 @@ class ConversationEngine:
                 "Не получилось выполнить агентский запрос. Попробуйте ещё раз позже.",
                 menu=self._menu_flag(),
             )
+        if result.screen is not None:
+            outcome = await self._render_screen(
+                telegram_user_id, result.screen[0], result.screen[1]
+            )
+            if outcome is not None:
+                return outcome
         pending_ops, due_payload = await self._pending_previews(
             telegram_user_id, result.pending_operation_ids
         )

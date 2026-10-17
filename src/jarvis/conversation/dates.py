@@ -43,6 +43,10 @@ def parse_human_date(text: str, now: datetime, tz: ZoneInfo) -> tuple[datetime |
         target = today
     elif "следующ" in lowered and "недел" in lowered:
         target = today + timedelta(days=(7 - today.weekday()))
+    elif "конц" in lowered and "месяц" in lowered:
+        target = _last_day_of_month(today)
+    elif "конц" in lowered and "недел" in lowered:
+        target = today + timedelta(days=(6 - today.weekday()))
     else:
         target = _match_weekday(lowered, today)
         if target is None:
@@ -56,6 +60,12 @@ def parse_human_date(text: str, now: datetime, tz: ZoneInfo) -> tuple[datetime |
     if target is None:
         target = today
     return datetime.combine(target, moment or time.min, tz), True
+
+
+def _last_day_of_month(day: date) -> date:
+    if day.month == 12:
+        return date(day.year, 12, 31)
+    return date(day.year, day.month + 1, 1) - timedelta(days=1)
 
 
 def _match_weekday(lowered: str, today: date) -> date | None:

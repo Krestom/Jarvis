@@ -146,6 +146,15 @@ class CreateCategoryArgs(BaseModel):
     name: str = Field(min_length=1, max_length=120, description="Название категории-папки")
 
 
+class CreateProjectArgs(BaseModel):
+    name: str = Field(min_length=1, max_length=200, description="Название проекта")
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class ListCommentsArgs(BaseModel):
+    task: str = Field(min_length=1, max_length=300, description="Название задачи")
+
+
 class UpdateTaskArgs(BaseModel):
     task_id: uuid.UUID
     title: str | None = Field(default=None, min_length=1, max_length=300)
@@ -269,6 +278,12 @@ _TOOLS: dict[str, ToolMeta] = {
         mutating=False,
         risk="low",
     ),
+    "list_comments": ToolMeta(
+        ListCommentsArgs,
+        "Комментарии задачи по её названию (данные из базы).",
+        mutating=False,
+        risk="low",
+    ),
     "create_task": ToolMeta(
         CreateTaskArgs,
         "Создать задачу. Инструмент ОТПРАВЛЯЕТ превью с кнопкой подтверждения — "
@@ -283,6 +298,13 @@ _TOOLS: dict[str, ToolMeta] = {
         "Создать категорию-папку для группировки задач (например «Рабочие», «Дом»). "
         "Отправляет превью с кнопкой подтверждения. Если такая категория уже есть — "
         "вернётся существующая без операции. Обратимо.",
+        mutating=True,
+        risk="low",
+    ),
+    "create_project": ToolMeta(
+        CreateProjectArgs,
+        "Создать проект по названию. Отправляет превью с кнопкой подтверждения. "
+        "Если такой проект уже есть — вернётся существующий без операции. Обратимо.",
         mutating=True,
         risk="low",
     ),
@@ -544,6 +566,45 @@ class ToolRegistry:
         ]
         return ToolResult(ok=True, data={"task": brief})
 
+    async def _list_comments(self, args: ListCommentsArgs) -> ToolResult:
+        repo = TaskRepository(self._session)
+        candidates = await repo.search(args.task, limit=5)
+        if not candidates:
+            candidates = await repo.search_like(args.task, limit=5)
+        if not candidates:
+            return ToolResult.failure("not_found", f"задача «{args.task}» не найдена")
+        if len(candidates) > 1:
+            for task in candidates:
+                await self._surface_task(task)
+            return ToolResult(
+                ok=True,
+                data={
+                    "status": "multiple_matches",
+                    "candidates": [
+                        {"task_id": str(task.id), "title": task.title}
+                        for task in candidates
+                    ],
+                    "note": "подходит несколько задач — уточни у пользователя, к какой",
+                },
+            )
+        task = candidates[0]
+        await self._surface_task(task)
+        comments = await TaskCommentRepository(self._session).list_for_task(task.id)
+        return ToolResult(
+            ok=True,
+            data={
+                "task_id": str(task.id),
+                "title": task.title,
+                "comments": [
+                    {
+                        "content": comment.content[:500],
+                        "created_at": comment.created_at.isoformat(),
+                    }
+                    for comment in comments
+                ],
+            },
+        )
+
     async def _list_improvements(self, args: ListImprovementsArgs) -> ToolResult:
         repo = ImprovementRepository(self._session)
         statuses: tuple[ImprovementStatus, ...] | None = None
@@ -802,6 +863,25 @@ class ToolRegistry:
             if str(operation.payload.get("name", "")).strip().lower() == name.lower():
                 return True
         return False
+
+    async def _create_project(self, args: CreateProjectArgs) -> ToolResult:
+        name = args.name.strip()[:200]
+        existing = await ProjectRepository(self._session).find_by_name(name)
+        if existing is not None:
+            return ToolResult(
+                ok=True,
+                mutating=True,
+                data={
+                    "project_id": str(existing.id),
+                    "name": existing.name,
+                    "note": "проект уже существует",
+                },
+            )
+        return await self._propose(
+            PendingOpType.CREATE_PROJECT,
+            {"name": name, "description": args.description},
+            summary=f"проект «{name}»",
+        )
 
     async def _update_task(self, args: UpdateTaskArgs) -> ToolResult:
         # exclude_unset: меняем только явно переданные поля; mode="json" — payload уйдёт в JSONB.

@@ -136,6 +136,36 @@ async def test_create_task_with_category(session, test_settings):
     assert tasks and tasks[0].category_id == category.id
 
 
+async def test_create_project_and_list_comments(session, test_settings):
+    from jarvis.services.confirmation import ConfirmationService
+
+    registry = make_registry(session, test_settings)
+    proposed = await registry.call("create_project", {"name": "Летний ремонт"})
+    assert proposed.ok is True
+    assert proposed.data["status"] == "confirmation_required"
+    assert await ProjectRepository(session).find_by_name("Летний ремонт") is None
+
+    await ConfirmationService(session, test_settings).confirm(
+        USER, registry.pending_operation_ids[-1]
+    )
+    assert await ProjectRepository(session).find_by_name("Летний ремонт") is not None
+
+    again = await registry.call("create_project", {"name": "Летний ремонт"})
+    assert again.ok is True
+    assert again.data["note"] == "проект уже существует"
+
+    task_id = await TaskService(session).create_from_draft(TaskDraft(title="Проверить вытяжку"))
+    await TaskCommentRepository(session).create(task_id, "Позвонить мастеру")
+    listed = await registry.call("list_comments", {"task": "вытяжк"})
+    assert listed.ok is True
+    assert listed.data["title"] == "Проверить вытяжку"
+    assert [comment["content"] for comment in listed.data["comments"]] == ["Позвонить мастеру"]
+
+    missing = await registry.call("list_comments", {"task": "такой задачи нет"})
+    assert missing.ok is False
+    assert missing.error_kind == "not_found"
+
+
 async def test_validation_not_found_and_unknown_tool_errors(session, test_settings):
     registry = make_registry(session, test_settings)
 

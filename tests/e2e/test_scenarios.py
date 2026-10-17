@@ -40,20 +40,26 @@ from tests.e2e.harness import DEFAULT_USER_ID, BotHarness, FakeTelegramSession
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture
+def classic_settings(test_settings):
+    """Детерминированный путь без агента: фолбэк, когда AI выключен или недоступен."""
+    return test_settings.model_copy(update={"agent_enabled": False})
+
+
 async def make_harness(
-    test_settings, session_factory, *, ai=None, transcription=None
+    settings, session_factory, *, ai=None, transcription=None
 ) -> BotHarness:
     async with session_factory() as session:
         await CatalogService(session).ensure_defaults()
         await session.commit()
     dispatcher = create_dispatcher(
-        test_settings,
+        settings,
         session_factory,
         ai or FakeProvider(),
         transcription,
     )
     session = FakeTelegramSession()
-    session.recorder = build_out_recorder(session_factory, test_settings)
+    session.recorder = build_out_recorder(session_factory, settings)
     harness = BotHarness(dispatcher, session)
     await harness.start()
     return harness
@@ -70,7 +76,7 @@ async def confirm_last(harness: BotHarness, user_id: int, messages) -> list:
 
 
 # 1. Текстовая мысль -> подтверждение -> запись находится поиском.
-async def test_scenario_text_note_to_search(test_settings, session_factory, session):
+async def test_scenario_text_note_to_search(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -83,7 +89,7 @@ async def test_scenario_text_note_to_search(test_settings, session_factory, sess
             confidence=0.95,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
 
     messages = await harness.send_text(
         DEFAULT_USER_ID, "Запомни, как я настраивал резервное копирование сервера"
@@ -105,7 +111,7 @@ async def test_scenario_text_note_to_search(test_settings, session_factory, sess
 
 
 # 2. Голосовая задача -> транскрибация -> подтверждение -> задача с группой/сроком.
-async def test_scenario_task_list_is_clickable(test_settings, session_factory, session):
+async def test_scenario_task_list_is_clickable(classic_settings, session_factory, session):
     """Список задач из NL («на неделю») — кнопки открытия карточки, без /tasks."""
     await TaskService(session).create_from_draft(
         TaskDraft(title="Обновить дашборд", bucket=TaskBucket.WEEK)
@@ -114,7 +120,7 @@ async def test_scenario_task_list_is_clickable(test_settings, session_factory, s
 
     ai = FakeProvider()
     ai.queue(Interpretation(intent="list_tasks", entities={"view": "week"}, confidence=0.9))
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
 
     messages = await harness.send_text(DEFAULT_USER_ID, "Какие у меня задачи на неделю?")
     assert any("Обновить дашборд" in (m.text or "") for m in messages)
@@ -133,13 +139,13 @@ async def test_scenario_task_list_is_clickable(test_settings, session_factory, s
     assert "🏁 Завершить" in labels  # в карточке есть действия
 
 
-async def test_scenario_voice_task(test_settings, session_factory, session):
+async def test_scenario_voice_task(classic_settings, session_factory, session):
     from zoneinfo import ZoneInfo
 
     ai = FakeProvider()
     # «Завтра 18:00» считаем в таймзоне пользователя: UTC-вариант ломается
     # поздно вечером, когда в МСК уже наступил следующий день.
-    tz = ZoneInfo(test_settings.app_timezone)
+    tz = ZoneInfo(classic_settings.app_timezone)
     tomorrow = (datetime.now(tz) + timedelta(days=1)).replace(
         hour=18, minute=0, second=0, microsecond=0
     )
@@ -158,7 +164,7 @@ async def test_scenario_voice_task(test_settings, session_factory, session):
         transcripts=["Поставь задачу на завтра: обновить инфраструктуру"]
     )
     harness = await make_harness(
-        test_settings, session_factory, ai=ai, transcription=transcription
+        classic_settings, session_factory, ai=ai, transcription=transcription
     )
 
     messages = await harness.send_voice(DEFAULT_USER_ID)
@@ -175,14 +181,14 @@ async def test_scenario_voice_task(test_settings, session_factory, session):
     await confirm_last(harness, DEFAULT_USER_ID, messages)
     await session.commit()
 
-    tasks = await TaskRepository(session).list_week(datetime.now(UTC), test_settings.tz)
+    tasks = await TaskRepository(session).list_week(datetime.now(UTC), classic_settings.tz)
     assert len(tasks) == 1
     assert tasks[0].title == "Обновить инфраструктуру"
 
 
 # 2b. Ошибка/лимит транскрибации показывается прямо в чате.
 async def test_scenario_voice_transcription_error_shown(
-    test_settings, session_factory, session
+    classic_settings, session_factory, session
 ):
     from jarvis.transcription.provider import TranscriptionError
 
@@ -195,7 +201,7 @@ async def test_scenario_voice_transcription_error_shown(
         ]
     )
     harness = await make_harness(
-        test_settings, session_factory, transcription=transcription
+        classic_settings, session_factory, transcription=transcription
     )
 
     messages = await harness.send_voice(DEFAULT_USER_ID)
@@ -206,7 +212,7 @@ async def test_scenario_voice_transcription_error_shown(
 
 # 3. Сценарий с документом и восстановлением состояния после «рестарта».
 async def test_scenario_document_flow_survives_restart(
-    test_settings, session_factory, session
+    classic_settings, session_factory, session
 ):
     ai = FakeProvider()
     ai.queue(
@@ -216,14 +222,14 @@ async def test_scenario_document_flow_survives_restart(
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
     messages = await harness.send_text(
         DEFAULT_USER_ID, "Сейчас пришлю паспорт, сохрани его в личных документах"
     )
     assert any("Пришлите файл" in (m.text or "") for m in messages)
 
     # «Рестарт»: новый dispatcher и новая сессия Telegram, та же БД.
-    harness2 = await make_harness(test_settings, session_factory, ai=FakeProvider())
+    harness2 = await make_harness(classic_settings, session_factory, ai=FakeProvider())
     content = b"%PDF-1.4 fake passport content"
     messages = await harness2.send_document(
         DEFAULT_USER_ID, filename="passport.pdf", content=content
@@ -244,7 +250,7 @@ async def test_scenario_document_flow_survives_restart(
     assert document.status == DocumentStatus.ACTIVE
 
     storage = EncryptedFileStorage(
-        test_settings.document_storage_path, test_settings.document_keyring()
+        classic_settings.document_storage_path, classic_settings.document_keyring()
     )
     saved = storage.verify(document.storage_key, document.sha256)
     assert saved == content
@@ -255,14 +261,14 @@ async def test_scenario_document_flow_survives_restart(
 
 # 4. Перенос срока: без подтверждения срок не меняется.
 async def test_scenario_due_change_requires_confirmation(
-    test_settings, session_factory, session
+    classic_settings, session_factory, session
 ):
     task_id = await TaskService(session).create_from_draft(
         TaskDraft(title="Продлить домен", bucket=TaskBucket.TODAY)
     )
     await session.commit()
 
-    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
     messages = await harness.send_text(DEFAULT_USER_ID, "/today")
     list_message = keyboard_messages(messages)[-1]
 
@@ -287,12 +293,12 @@ async def test_scenario_due_change_requires_confirmation(
     task = await TaskRepository(session).get(task_id)
     await session.refresh(task)
     assert task.due_at is not None
-    expected = (datetime.now(UTC) + timedelta(days=1)).astimezone(test_settings.tz)
-    assert task.due_at.astimezone(test_settings.tz).date() == expected.date()
+    expected = (datetime.now(UTC) + timedelta(days=1)).astimezone(classic_settings.tz)
+    assert task.due_at.astimezone(classic_settings.tz).date() == expected.date()
 
 
 # 5. Отмена операции: запись не создаётся.
-async def test_scenario_cancel_operation(test_settings, session_factory, session):
+async def test_scenario_cancel_operation(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -301,7 +307,7 @@ async def test_scenario_cancel_operation(test_settings, session_factory, session
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
     messages = await harness.send_text(DEFAULT_USER_ID, "Запомни важную мысль")
     confirmation = keyboard_messages(messages)[-1]
     await harness.click_button(DEFAULT_USER_ID, confirmation, "Отменить")
@@ -312,7 +318,7 @@ async def test_scenario_cancel_operation(test_settings, session_factory, session
 
 
 # 5.1. «Изменить» на черновике задачи применяет новое название (регрессия).
-async def test_pending_task_rename_via_edit(test_settings, session_factory, session):
+async def test_pending_task_rename_via_edit(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -321,7 +327,7 @@ async def test_pending_task_rename_via_edit(test_settings, session_factory, sess
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
 
     messages = await harness.send_text(DEFAULT_USER_ID, "поставь задачу: старая формулировка")
     preview = keyboard_messages(messages)[-1]
@@ -349,7 +355,7 @@ async def test_pending_task_rename_via_edit(test_settings, session_factory, sess
 
 
 # 5.2. Задача без срока: сначала уточняем, нужен ли срок.
-async def test_pending_task_without_due_asks_deadline(test_settings, session_factory, session):
+async def test_pending_task_without_due_asks_deadline(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -358,7 +364,7 @@ async def test_pending_task_without_due_asks_deadline(test_settings, session_fac
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
 
     messages = await harness.send_text(DEFAULT_USER_ID, "поставь задачу: полить цветы")
     combined = " ".join(m.text or "" for m in messages)
@@ -375,7 +381,7 @@ async def test_pending_task_without_due_asks_deadline(test_settings, session_fac
     assert tasks and tasks[0].due_at is None
 
 
-async def test_pending_task_without_due_accepts_date(test_settings, session_factory, session):
+async def test_pending_task_without_due_accepts_date(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -384,7 +390,7 @@ async def test_pending_task_without_due_accepts_date(test_settings, session_fact
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
 
     await harness.send_text(DEFAULT_USER_ID, "поставь задачу: пересадить цветок")
     messages = await harness.send_text(DEFAULT_USER_ID, "завтра")
@@ -399,9 +405,46 @@ async def test_pending_task_without_due_accepts_date(test_settings, session_fact
     assert tasks and tasks[0].due_at is not None
 
 
+async def test_pending_task_in_new_category_is_attached(
+    classic_settings, session_factory, session
+):
+    """Категория названа, но её нет: задача привяжется по имени, категория создастся."""
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="create_task",
+            entities={
+                "title": "Вызвать мастера",
+                "category": "Ванная",
+                "due_at": "2026-11-01T12:00:00+03:00",
+            },
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, "Заведи задачу в категории «Ванная»: вызвать мастера"
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Создать задачу?" in combined
+    assert "Ванная" in combined  # категория попала в превью
+
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    session.expire_all()
+
+    from jarvis.repositories.categories import CategoryRepository
+
+    tasks = await TaskRepository(session).search("Вызвать мастера")
+    category = await CategoryRepository(session).find_by_name("Ванная")
+    assert category is not None
+    assert tasks and tasks[0].category_id == category.id
+
+
 # 6. Неавторизованный пользователь не получает доступ.
-async def test_scenario_unauthorized_user_is_ignored(test_settings, session_factory, session):
-    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+async def test_scenario_unauthorized_user_is_ignored(classic_settings, session_factory, session):
+    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
     messages = await harness.send_text(9999, "Покажи мои секреты")
     assert messages == []
     count = await session.scalar(select(func.count()).select_from(KnowledgeItem))
@@ -409,7 +452,7 @@ async def test_scenario_unauthorized_user_is_ignored(test_settings, session_fact
 
 
 # 7. Повторное нажатие подтверждения не дублирует операцию.
-async def test_scenario_confirm_is_idempotent(test_settings, session_factory, session):
+async def test_scenario_confirm_is_idempotent(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -418,7 +461,7 @@ async def test_scenario_confirm_is_idempotent(test_settings, session_factory, se
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
     messages = await harness.send_text(DEFAULT_USER_ID, "Задача: один раз")
     confirmation = keyboard_messages(messages)[-1]
 
@@ -431,8 +474,8 @@ async def test_scenario_confirm_is_idempotent(test_settings, session_factory, se
 
 
 # 8. Секреты шифруются, не показываются в превью и не ищутся.
-async def test_scenario_secret_flow(test_settings, session_factory, session):
-    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+async def test_scenario_secret_flow(classic_settings, session_factory, session):
+    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
 
     messages = await harness.send_text(DEFAULT_USER_ID, "/secret")
     assert any("Пришлите значение секрета" in (m.text or "") for m in messages)
@@ -450,7 +493,7 @@ async def test_scenario_secret_flow(test_settings, session_factory, session):
 
     secrets = await SecretRepository(session).list_active()
     assert len(secrets) == 1
-    service = SecretService(session, test_settings)
+    service = SecretService(session, classic_settings)
     assert service.decrypt_value(secrets[0].encrypted_value) == "ssh-ed25519 AAAATESTKEY secret"
 
     # Поиск не находит секреты: значение не является знанием.
@@ -459,13 +502,13 @@ async def test_scenario_secret_flow(test_settings, session_factory, session):
 
 
 # 9. Комментарии к задаче через карточку: добавить, увидеть, отредактировать.
-async def test_scenario_task_comments_via_card(test_settings, session_factory, session):
+async def test_scenario_task_comments_via_card(classic_settings, session_factory, session):
     task_id = await TaskService(session).create_from_draft(
         TaskDraft(title="Проверить бэкап", bucket=TaskBucket.TODAY)
     )
     await session.commit()
 
-    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
     messages = await harness.send_text(DEFAULT_USER_ID, "/today")
     list_message = keyboard_messages(messages)[-1]
 
@@ -512,7 +555,7 @@ async def test_scenario_task_comments_via_card(test_settings, session_factory, s
 
 
 # 10. Естественный язык: «добавь к задаче …» → выбор задачи → комментарий.
-async def test_scenario_add_comment_natural_language(test_settings, session_factory, session):
+async def test_scenario_add_comment_natural_language(classic_settings, session_factory, session):
     service = TaskService(session)
     task_infra_id = await service.create_from_draft(TaskDraft(title="Обновить инфраструктуру"))
     await service.create_from_draft(TaskDraft(title="Обновить документацию"))
@@ -529,7 +572,7 @@ async def test_scenario_add_comment_natural_language(test_settings, session_fact
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
     messages = await harness.send_text(
         DEFAULT_USER_ID, "Добавь к задаче про обновление: согласовать окно с провайдером"
     )
@@ -551,7 +594,7 @@ async def test_scenario_add_comment_natural_language(test_settings, session_fact
 
 
 # 11. Сообщение с секретом: кнопка «Всё равно сохранить» сохраняет как чувствительную заметку.
-async def test_scenario_force_save_secret(test_settings, session_factory, session):
+async def test_scenario_force_save_secret(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -561,7 +604,7 @@ async def test_scenario_force_save_secret(test_settings, session_factory, sessio
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
     messages = await harness.send_text(
         DEFAULT_USER_ID, "Запомни пароль от роутера: password=SuperSecret123"
     )
@@ -586,7 +629,7 @@ async def test_scenario_force_save_secret(test_settings, session_factory, sessio
 
 
 # 12. «Какие у меня задачи на неделю» — выводим список, а не «ничего не нашёл».
-async def test_scenario_list_tasks(test_settings, session_factory, session):
+async def test_scenario_list_tasks(classic_settings, session_factory, session):
     service = TaskService(session)
     await service.create_from_draft(TaskDraft(title="Обновить дашборд", bucket=TaskBucket.WEEK))
     await service.create_from_draft(TaskDraft(title="Позвонить в сервис", bucket=TaskBucket.TODAY))
@@ -596,7 +639,7 @@ async def test_scenario_list_tasks(test_settings, session_factory, session):
     ai.queue(
         Interpretation(intent="list_tasks", entities={"view": "week"}, confidence=0.95)
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
     messages = await harness.send_text(DEFAULT_USER_ID, "Какие у меня задачи на этой неделе?")
 
     combined = " ".join(m.text or "" for m in messages)
@@ -605,7 +648,7 @@ async def test_scenario_list_tasks(test_settings, session_factory, session):
 
 
 # 13. «Какие комментарии к задаче X» — показываем комментарии.
-async def test_scenario_list_comments(test_settings, session_factory, session):
+async def test_scenario_list_comments(classic_settings, session_factory, session):
     task_id = await TaskService(session).create_from_draft(
         TaskDraft(title="Обновить инфраструктуру")
     )
@@ -622,7 +665,7 @@ async def test_scenario_list_comments(test_settings, session_factory, session):
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
     messages = await harness.send_text(
         DEFAULT_USER_ID, "Какие комментарии у меня к задаче про инфраструктуру?"
     )
@@ -631,7 +674,7 @@ async def test_scenario_list_comments(test_settings, session_factory, session):
 
 
 # 14. «Сохрани креды в проект SuperSport» — проект создаётся, запись привязывается.
-async def test_scenario_credentials_into_project(test_settings, session_factory, session):
+async def test_scenario_credentials_into_project(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -645,7 +688,7 @@ async def test_scenario_credentials_into_project(test_settings, session_factory,
             confidence=0.9,
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
     messages = await harness.send_text(
         DEFAULT_USER_ID,
         "Создай проект SuperSport и сохрани туда креды доступа: логин admin, пароль qwerty-123",
@@ -674,7 +717,7 @@ async def test_scenario_credentials_into_project(test_settings, session_factory,
 
 
 # 15. Жалоба на ассистента: достоверная гипотеза — в backlog, слабая — отброшена.
-async def test_scenario_improvement_hypothesis_recorded(test_settings, session_factory, session):
+async def test_scenario_improvement_hypothesis_recorded(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
         Interpretation(
@@ -702,7 +745,7 @@ async def test_scenario_improvement_hypothesis_recorded(test_settings, session_f
             },
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
 
     await harness.send_text(DEFAULT_USER_ID, "Ты не напоминаешь мне про дедлайны")
     await harness.send_text(DEFAULT_USER_ID, "Может, и ничего, не знаю")
@@ -717,8 +760,8 @@ async def test_scenario_improvement_hypothesis_recorded(test_settings, session_f
 
 
 # 16. Технический сбой обработки апдейта автоматически попадает в backlog.
-async def test_scenario_technical_error_recorded(test_settings, session_factory, session):
-    harness = await make_harness(test_settings, session_factory)
+async def test_scenario_technical_error_recorded(classic_settings, session_factory, session):
+    harness = await make_harness(classic_settings, session_factory)
 
     crash_router = Router()
 
@@ -745,8 +788,8 @@ async def test_scenario_technical_error_recorded(test_settings, session_factory,
 
 
 # 17. /diagnostics: сводка → список → карточка → статус → удаление с подтверждением.
-async def test_scenario_diagnostics_backlog_flow(test_settings, session_factory, session):
-    item = await ImprovementService(session, test_settings).record_failure(
+async def test_scenario_diagnostics_backlog_flow(classic_settings, session_factory, session):
+    item = await ImprovementService(session, classic_settings).record_failure(
         title="ValueError: callback data too long",
         summary="Кнопка не отправилась",
         component="telegram_bot",
@@ -754,7 +797,7 @@ async def test_scenario_diagnostics_backlog_flow(test_settings, session_factory,
     item_id = item.id
     await session.commit()
 
-    harness = await make_harness(test_settings, session_factory)
+    harness = await make_harness(classic_settings, session_factory)
     messages = await harness.send_text(DEFAULT_USER_ID, "/diagnostics")
     combined = " ".join(m.text or "" for m in messages)
     assert "Backlog улучшений: 1 записей (открытых: 1)" in combined
@@ -790,16 +833,16 @@ async def test_scenario_diagnostics_backlog_flow(test_settings, session_factory,
 
 
 # 18. /export_issues: файлы MD+JSON без секретов уходят в чат.
-async def test_scenario_export_issues(test_settings, session_factory, session, tmp_path):
-    test_settings.export_dir = tmp_path / "exports"
-    await ImprovementService(session, test_settings).record_failure(
+async def test_scenario_export_issues(classic_settings, session_factory, session, tmp_path):
+    classic_settings.export_dir = tmp_path / "exports"
+    await ImprovementService(session, classic_settings).record_failure(
         title="Сбой экспорта",
         summary="Из лога утёк токен: password=hunter2secret",
         component="telegram_bot",
     )
     await session.commit()
 
-    harness = await make_harness(test_settings, session_factory)
+    harness = await make_harness(classic_settings, session_factory)
     messages = await harness.send_text(DEFAULT_USER_ID, "/export_issues")
     assert any("Экспорт готов" in (m.text or "") for m in messages)
     documents = [m for m in messages if m.document is not None]
@@ -820,7 +863,7 @@ async def test_scenario_export_issues(test_settings, session_factory, session, t
 
 
 # 19. Типизированный UI: LLM просит кнопки, сервер собирает их по allow-list.
-async def test_scenario_typed_ui_quick_actions(test_settings, session_factory, session):
+async def test_scenario_typed_ui_quick_actions(classic_settings, session_factory, session):
     await TaskService(session).create_from_draft(
         TaskDraft(title="Позвонить в сервис", bucket=TaskBucket.TODAY)
     )
@@ -837,7 +880,7 @@ async def test_scenario_typed_ui_quick_actions(test_settings, session_factory, s
             },
         )
     )
-    harness = await make_harness(test_settings, session_factory, ai=ai)
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
     messages = await harness.send_text(DEFAULT_USER_ID, "Привет, что ты умеешь?")
 
     reply_message = keyboard_messages(messages)[-1]
@@ -856,8 +899,8 @@ async def test_scenario_typed_ui_quick_actions(test_settings, session_factory, s
 
 
 # 20. «Выведи задачи на <дата>» — детерминированный список по календарю.
-async def test_scenario_tasks_on_named_date(test_settings, session_factory, session):
-    tz = test_settings.tz
+async def test_scenario_tasks_on_named_date(classic_settings, session_factory, session):
+    tz = classic_settings.tz
     due = (datetime.now(tz) + timedelta(days=3)).replace(
         hour=12, minute=0, second=0, microsecond=0
     )
@@ -865,7 +908,7 @@ async def test_scenario_tasks_on_named_date(test_settings, session_factory, sess
     await TaskService(session).create_from_draft(TaskDraft(title="Другая задача"))
     await session.commit()
 
-    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
     messages = await harness.send_text(
         DEFAULT_USER_ID, f"Выведи мне задачи на {due.strftime('%d.%m.%Y')}"
     )
@@ -876,14 +919,14 @@ async def test_scenario_tasks_on_named_date(test_settings, session_factory, sess
 
 
 # 21. Категории-папки задач: просмотр задач по категории.
-async def test_scenario_tasks_by_category(test_settings, session_factory, session):
+async def test_scenario_tasks_by_category(classic_settings, session_factory, session):
     category = await CategoryRepository(session).create("Рабочие")
     await TaskService(session).create_from_draft(
         TaskDraft(title="Отчёт по УВ", category_id=category.id)
     )
     await session.commit()
 
-    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
     messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
     menu_message = keyboard_messages(messages)[-1]
 
@@ -897,8 +940,8 @@ async def test_scenario_tasks_by_category(test_settings, session_factory, sessio
 
 
 # 22. Категории документов: назначение из карточки и просмотр по категории.
-async def test_scenario_document_category_flow(test_settings, session_factory, session):
-    harness = await make_harness(test_settings, session_factory, ai=FakeProvider())
+async def test_scenario_document_category_flow(classic_settings, session_factory, session):
+    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
     messages = await harness.send_document(
         DEFAULT_USER_ID, filename="passport.pdf", content=b"%PDF-1.4 data"
     )

@@ -28,12 +28,22 @@ UI-компоненты (опционально, только в reply):
 - {"component": "quick_actions", "actions": [...]} — кнопки из allow-list:
   search, tasks_today, tasks_week, tasks_inbox, documents, projects, settings,
   diagnostics. Только когда это уместно как подсказка.
+- {"component": "screen", "name": "tasks", "params": {...}} — открыть настоящий
+  список задач с кликабельными карточками. params: view (today, week, long_term,
+  someday, no_group, inbox, done), либо on_date ("ГГГГ-ММ-ДД"), либо category
+  (название категории). Используй, когда просят показать/вывести список задач —
+  не перечисляй их текстом.
+- {"component": "screen", "name": "search", "params": {"query": "..."}} — открыть
+  структурированный поиск по внутренней базе (записи, задачи, документы, с кнопками
+  и страницами). Используй, когда просят найти записи/инструкции/заметки.
 - {"component": "entity_choice", "entity_kind": "task|project|knowledge",
   "entity_ids": ["<uuid из контекста>"], "prompt": "Уточните, что имелось в виду"}
   — когда пользователь может иметь в виду несколько реальных сущностей.
   Разрешены ТОЛЬКО id из контекста запроса (кандидаты/результаты инструментов).
 
 Правила:
+- Учитывай последние реплики из контекста, если они есть: пользователь может
+  отвечать на твой предыдущий вопрос или продолжать тему.
 - Порядок: сначала ищи во внутренних данных (search_all/search_tasks/...), и
   только при реальной необходимости внешних фактов — web_search.
 - Если использовал web_search — в финальном ответе указывай источники (url),
@@ -119,6 +129,7 @@ def build_context_block(
     selected: dict[str, Any] | None,
     candidates: list[dict[str, Any]],
     notes: list[str] | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> str:
     """Сообщение пользователя + безопасный контекст (без секретов)."""
     lines: list[str] = []
@@ -136,6 +147,11 @@ def build_context_block(
             )
     if notes:
         lines.extend(notes)
+    if history:
+        lines.append("Последние реплики диалога (учитывай при ответе):")
+        for item in history[-8:]:
+            who = "Пользователь" if item.get("role") == "user" else "Jarvis"
+            lines.append(f"{who}: {item.get('text', '')}")
     if lines:
         lines.append("")
     lines.append("Запрос пользователя:")

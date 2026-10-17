@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +24,7 @@ from jarvis.agent.schemas import EntityCandidate
 from jarvis.agent.tools import ToolRegistry, ToolResult
 from jarvis.ai import AIError, AIProvider, AIUnavailableError, InterpreterContext
 from jarvis.ai.prompts import format_llm_text
-from jarvis.ai.schemas import EntityChoice, PlanStep, UIRequest
+from jarvis.ai.schemas import EntityChoice, PlanStep, ScreenRequest, UIRequest
 from jarvis.config.settings import Settings
 from jarvis.conversation.state import ConversationStore
 from jarvis.repositories.conversation import ConversationRepository
@@ -33,6 +33,7 @@ from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.research import create_search_provider
 from jarvis.research.provider import WebSearchProvider
+from jarvis.services.tasks import TASK_VIEWS
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,10 @@ class AgentResult:
     entity_choices: list[EntityCandidate] = field(default_factory=list)
     choice_prompt: str | None = None
     surfaced: list[EntityCandidate] = field(default_factory=list)
+    # Детерминированный экран, который попросил открыть агент (name, params).
+    screen: tuple[str, dict] | None = None
+    # Текст исходного запроса — для короткой памяти диалога.
+    request_text: str = ""
 
 
 class AgentService:
@@ -95,6 +100,7 @@ class AgentService:
                 profile=profile.name,
             )
         result.duration_ms = int((time.monotonic() - started) * 1000)
+        result.request_text = text
         await self._save_context(telegram_user_id, result)
         log.info(
             "agent request done user=%s profile=%s termination=%s "
@@ -153,6 +159,7 @@ class AgentService:
                     text,
                     selected=stored.get("agent_selected"),
                     candidates=stored.get("agent_candidates") or [],
+                    history=stored.get("agent_history") or [],
                 ),
             },
         ]
@@ -304,6 +311,13 @@ class AgentService:
         if isinstance(step.ui, UIRequest):
             result.quick_actions = list(step.ui.actions)
             return
+        if isinstance(step.ui, ScreenRequest):
+            screen = self._validate_screen(step.ui)
+            if screen is not None:
+                result.screen = screen
+            else:
+                log.info("agent screen request dropped: %s", step.ui.model_dump())
+            return
         if isinstance(step.ui, EntityChoice):
             choices = await self._validate_choices(step.ui, registry, stored)
             if choices:
@@ -311,6 +325,33 @@ class AgentService:
                 result.choice_prompt = step.ui.prompt or "Уточните, что имелось в виду:"
             else:
                 log.info("agent entity_choice dropped: no valid candidates")
+
+    def _validate_screen(self, ui: ScreenRequest) -> tuple[str, dict] | None:
+        """Экраны — allow-list; параметры проверяются, иначе запрос отбрасываем."""
+        params = dict(ui.params or {})
+        if ui.name == "tasks":
+            clean: dict = {}
+            view = str(params.get("view") or "").strip()
+            if view:
+                if view not in TASK_VIEWS:
+                    return None
+                clean["view"] = view
+            on_date = str(params.get("on_date") or "").strip()
+            if on_date:
+                try:
+                    clean["on_date"] = date.fromisoformat(on_date)
+                except ValueError:
+                    return None
+            category = str(params.get("category") or "").strip()
+            if category:
+                clean["category"] = category[:120]
+            return ("tasks", clean)
+        if ui.name == "search":
+            query = str(params.get("query") or "").strip()
+            if not query:
+                return None
+            return ("search", {"query": query[:200]})
+        return None
 
     async def _validate_choices(
         self, ui: EntityChoice, registry: ToolRegistry, stored: dict
@@ -357,8 +398,16 @@ class AgentService:
         # Пустой результат (занятая очередь, отмена) не стирает прежний контекст:
         # «добавь к первой» должен ссылаться на задачи прошлого успешного запроса.
         candidates = result.entity_choices or result.surfaced
+        # Короткая память диалога: последние реплики (обрезанные) для контекста агента.
+        history = list(stored.get("agent_history") or [])
+        if result.request_text.strip():
+            history.append({"role": "user", "text": result.request_text.strip()[:300]})
+        if result.text.strip():
+            history.append({"role": "assistant", "text": result.text.strip()[:300]})
+        history = history[-8:]
         data = {
             **stored,
+            "agent_history": history,
             "agent_candidates": [
                 candidate.model_dump(mode="json") for candidate in candidates
             ]

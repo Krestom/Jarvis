@@ -48,6 +48,15 @@ def test_next_week() -> None:
     assert parse("на следующей неделе").date().isoformat() == "2026-10-19"
 
 
+def test_end_of_month() -> None:
+    assert parse("до конца месяца").date().isoformat() == "2026-10-31"
+
+
+def test_end_of_week() -> None:
+    # 2026-10-15 — четверг, конец недели — воскресенье 18.10.
+    assert parse("до конца недели").date().isoformat() == "2026-10-18"
+
+
 def test_numeric_date_with_year() -> None:
     assert parse("22.10.2026").date().isoformat() == "2026-10-22"
 

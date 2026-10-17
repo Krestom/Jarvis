@@ -8,7 +8,7 @@ import json
 import pytest
 
 from jarvis.ai.fake import FakeProvider
-from jarvis.ai.schemas import Interpretation, PlanStep
+from jarvis.ai.schemas import Interpretation, PlanStep, ScreenRequest
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import KnowledgeSource, KnowledgeType, TaskBucket
@@ -332,6 +332,89 @@ async def test_agent_task_without_due_asks_deadline_first(
     assert tasks and tasks[0].due_at is None
 
 
+async def test_plain_text_handled_by_agent_without_invocation(
+    test_settings, session_factory, session
+):
+    """Весь текст уходит агенту, даже без обращения по имени."""
+    ai = FakeProvider()
+    ai.queue_plan(
+        PlanStep(
+            type="tool_call",
+            tool="create_task",
+            args={"title": "Полить цветы", "due_at": "2026-10-20T12:00:00+03:00"},
+        )
+    )
+    ai.queue_plan(PlanStep(type="reply", text="Подготовил задачу — подтвердите кнопкой."))
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "поставь задачу: полить цветы")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Создать задачу?" in combined
+
+
+async def test_agent_opens_tasks_screen(test_settings, session_factory, session):
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="Починить сервер", bucket=TaskBucket.WEEK)
+    )
+    await session.commit()
+    ai = FakeProvider()
+    ai.queue_plan(
+        PlanStep(
+            type="reply",
+            text="Открываю список задач.",
+            ui=ScreenRequest(component="screen", name="tasks", params={"view": "week"}),
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "покажи задачи на неделю")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Задачи на этой неделе" in combined
+    assert "Починить сервер" in combined
+    assert keyboard_messages(messages)  # кликабельные карточки
+
+
+async def test_agent_opens_search_screen(test_settings, session_factory, session):
+    await KnowledgeRepository(session).create(
+        type=KnowledgeType.NOTE,
+        title="Резервное копирование",
+        content="Инструкция по бэкапу сервера",
+        source_type=KnowledgeSource.TEXT,
+    )
+    await session.commit()
+    ai = FakeProvider()
+    ai.queue_plan(
+        PlanStep(
+            type="reply",
+            text="Ищу в базе.",
+            ui=ScreenRequest(
+                component="screen", name="search", params={"query": "резервное копирование"}
+            ),
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "найди инструкцию про бэкап")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Результаты по запросу" in combined
+    assert "Резервное копирование" in combined
+
+
+async def test_agent_keeps_last_turns_in_context(test_settings, session_factory, session):
+    """Короткая память диалога: вторая реплика видит первую."""
+    ai = FakeProvider()
+    ai.queue_plan(PlanStep(type="reply", text="Уточни, нужен ли срок?"))
+    ai.queue_plan(PlanStep(type="reply", text="Понял."))
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    await harness.send_text(DEFAULT_USER_ID, "поставь задачу пересадить цветок")
+    await harness.send_text(DEFAULT_USER_ID, "срок не нужен, спасибо")
+
+    assert len(ai.plan_calls) == 2
+    assert "поставь задачу пересадить цветок" in ai.plan_calls[1]
+    assert "Уточни, нужен ли срок?" in ai.plan_calls[1]
+
+
 async def test_agent_quick_actions_keyboard_from_reply(    test_settings, session_factory, session
 ):
     ai = FakeProvider()
@@ -452,7 +535,8 @@ async def test_stale_search_state_does_not_trap_messages(
     await session.commit()
 
     ai = FakeProvider()
-    ai.queue(Interpretation(intent="list_tasks", entities={"view": "week"}, confidence=0.9))
+    ai.queue_plan(PlanStep(type="tool_call", tool="list_tasks", args={"view": "week"}))
+    ai.queue_plan(PlanStep(type="reply", text="На неделю: «Обновить дашборд»."))
     harness = await make_harness(test_settings, session_factory, ai=ai)
 
     messages = await harness.send_text(DEFAULT_USER_ID, "Какие у меня задачи на неделю?")
@@ -475,7 +559,8 @@ async def test_search_flow_releases_after_results(test_settings, session_factory
     await session.commit()
 
     ai = FakeProvider()
-    ai.queue(Interpretation(intent="list_tasks", entities={"view": "week"}, confidence=0.9))
+    ai.queue_plan(PlanStep(type="tool_call", tool="list_tasks", args={"view": "week"}))
+    ai.queue_plan(PlanStep(type="reply", text="На неделю: «Починить сервер»."))
     harness = await make_harness(test_settings, session_factory, ai=ai)
 
     # /search ждёт ввод — этот текст действительно ищется.
@@ -483,7 +568,7 @@ async def test_search_flow_releases_after_results(test_settings, session_factory
     results = await harness.send_text(DEFAULT_USER_ID, "резервное копирование")
     assert any("Результаты по запросу" in (m.text or "") for m in results)
 
-    # Следующее обычное сообщение проходит обычным путём (интерпретация).
+    # Следующее обычное сообщение обрабатывает агент.
     messages = await harness.send_text(DEFAULT_USER_ID, "Какие у меня задачи на неделю?")
     combined = " ".join(m.text or "" for m in messages)
     assert "Починить сервер" in combined
