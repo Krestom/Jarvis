@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -9,7 +10,6 @@ from sqlalchemy import func, select
 
 from jarvis.db.models import AuditLog, Task
 from jarvis.domain.enums import PendingOpType, PendingStatus, TaskBucket
-from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.pending import PendingOperationRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.confirmation import ConfirmationService
@@ -100,18 +100,17 @@ async def test_update_task_applies_changes(session, test_settings):
 
 
 async def test_failed_apply_is_reported_and_recorded(session, test_settings):
-    repo = CategoryRepository(session)
-    await repo.create("Работа")
-
     service = ConfirmationService(session, test_settings)
     operation_id = await service.propose(
-        USER, PendingOpType.CREATE_CATEGORY, {"name": "Работа"}
+        USER,
+        PendingOpType.UPDATE_TASK,
+        {"task_id": str(uuid.uuid4()), "changes": {"status": "done"}},
     )
     result = await service.confirm(USER, operation_id)
     assert not result.ok
-    assert "существует" in result.summary
+    assert "не найдена" in result.summary
 
     pending_repo = PendingOperationRepository(session)
-    operation = await pending_repo.get(__import__("uuid").UUID(operation_id))
+    operation = await pending_repo.get(uuid.UUID(operation_id))
     assert operation is not None
     assert operation.status == PendingStatus.FAILED

@@ -278,7 +278,13 @@ async def test_agent_multiple_operations_each_get_a_button(
             args={"task_id": str(task_id), "content": "первый"},
         )
     )
-    ai.queue_plan(PlanStep(type="tool_call", tool="create_task", args={"title": "Новая задача"}))
+    ai.queue_plan(
+        PlanStep(
+            type="tool_call",
+            tool="create_task",
+            args={"title": "Новая задача", "due_at": "2026-10-20T12:00:00+03:00"},
+        )
+    )
     ai.queue_plan(PlanStep(type="reply", text="Подготовил две операции."))
     harness = await make_harness(test_settings, session_factory, ai=ai)
 
@@ -298,6 +304,32 @@ async def test_agent_multiple_operations_each_get_a_button(
     comments = await TaskCommentRepository(session).list_for_task(task_id)
     assert [comment.content for comment in comments] == ["первый"]
     assert await TaskRepository(session).search("Новая задача")
+
+
+async def test_agent_task_without_due_asks_deadline_first(
+    test_settings, session_factory, session
+):
+    """Задача без срока: сначала вопрос про срок, превью — только после ответа."""
+    ai = FakeProvider()
+    ai.queue_plan(PlanStep(type="tool_call", tool="create_task", args={"title": "Полить цветы"}))
+    ai.queue_plan(PlanStep(type="reply", text="Подготовил задачу."))
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "Джарвис, заведи задачу: полить цветы")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Нужен ли срок" in combined
+    assert "Создать задачу?" not in combined  # превью ещё не отправлено
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "без срока")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Создать задачу?" in combined
+    assert keyboard_messages(messages)
+
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    session.expire_all()
+    tasks = await TaskRepository(session).search("Полить цветы")
+    assert tasks and tasks[0].due_at is None
 
 
 async def test_agent_quick_actions_keyboard_from_reply(    test_settings, session_factory, session

@@ -79,6 +79,9 @@ TASK_VIEW_LABELS = {
 # а не срок создания задачи.
 _DATE_LIST_PREFIX = re.compile(r"(?i)^\s*(какие|что|выведи|покажи|дай|список|найди)\b")
 
+# Ответы «срок не нужен» на вопрос «Нужен ли срок?» (задача без дедлайна).
+NO_DUE_ANSWERS = ("нет", "не надо", "не нужно", "без срока", "без дедлайна")
+
 
 @dataclass
 class EngineOutcome:
@@ -193,6 +196,9 @@ class ConversationEngine:
                 PendingOpType.UPDATE_TASK,
                 {"task_id": task_id, "changes": {"due_at": parsed.isoformat()}},
             )
+
+        if state is not None and state.flow == Flow.AWAIT_TASK_DUE:
+            return await self._handle_task_due_answer(telegram_user_id, state, text)
 
         if state is not None and state.flow == Flow.AWAIT_COMMENT:
             task_id = str(state.data.get("task_id", ""))
@@ -591,9 +597,11 @@ class ConversationEngine:
         telegram_user_id: int,
         operation_type: PendingOpType,
         draft: BaseModel,
+        *,
+        ask_due: bool = True,
     ) -> EngineOutcome:
         return await self._propose_payload(
-            telegram_user_id, operation_type, draft.model_dump(mode="json")
+            telegram_user_id, operation_type, draft.model_dump(mode="json"), ask_due=ask_due
         )
 
     async def _propose_payload(
@@ -601,12 +609,53 @@ class ConversationEngine:
         telegram_user_id: int,
         operation_type: PendingOpType,
         payload: dict,
+        *,
+        ask_due: bool = True,
     ) -> EngineOutcome:
+        if (
+            ask_due
+            and operation_type == PendingOpType.CREATE_TASK
+            and payload.get("due_at") is None
+        ):
+            return await self._ask_task_due(telegram_user_id, dict(payload))
         operation_id = await self._confirmation.propose(telegram_user_id, operation_type, payload)
         preview = await render_preview(
             self._session, operation_type, payload, self._settings.tz
         )
         return EngineOutcome("", pending_ops=[(operation_id, preview)])
+
+    async def _ask_task_due(self, telegram_user_id: int, payload: dict) -> EngineOutcome:
+        """Задача без срока: сначала уточняем срок, операцию пока не создаём."""
+        await self._store.set(telegram_user_id, Flow.AWAIT_TASK_DUE, data={"draft": payload})
+        title = html_escape(str(payload.get("title") or "задача"))
+        return EngineOutcome(
+            f"Задача «{title}» — без срока. Нужен ли срок? Напишите дату "
+            "(например, «22.10.2026» или «в пятницу») или ответьте «без срока»."
+        )
+
+    async def _handle_task_due_answer(
+        self, telegram_user_id: int, state, text: str
+    ) -> EngineOutcome:
+        draft = dict(state.data.get("draft") or {})
+        if not draft:
+            await self._store.clear(telegram_user_id)
+            return EngineOutcome("Черновик задачи потерялся — повторите запрос.")
+        if text.strip().lower().rstrip(".!") in NO_DUE_ANSWERS:
+            await self._store.clear(telegram_user_id)
+            return await self._propose_payload(
+                telegram_user_id, PendingOpType.CREATE_TASK, draft, ask_due=False
+            )
+        parsed, matched = parse_human_date(text, datetime.now(UTC), self._settings.tz)
+        if parsed is None or not matched:
+            return EngineOutcome(
+                "Не понял дату. Напишите «22.10.2026», «в пятницу» или «22.10 в 18:00», "
+                "либо ответьте «без срока»."
+            )
+        await self._store.clear(telegram_user_id)
+        draft["due_at"] = parsed.isoformat()
+        return await self._propose_payload(
+            telegram_user_id, PendingOpType.CREATE_TASK, draft, ask_due=False
+        )
 
     # --- Stage 3: агент ---
 
@@ -632,7 +681,13 @@ class ConversationEngine:
                 "Не получилось выполнить агентский запрос. Попробуйте ещё раз позже.",
                 menu=self._menu_flag(),
             )
-        pending_ops = await self._pending_previews(result.pending_operation_ids)
+        pending_ops, due_payload = await self._pending_previews(
+            telegram_user_id, result.pending_operation_ids
+        )
+        if due_payload is not None:
+            question = await self._ask_task_due(telegram_user_id, due_payload)
+            question.pending_ops = pending_ops
+            return question
         return EngineOutcome(
             result.text,
             pending_ops=pending_ops,
@@ -644,26 +699,40 @@ class ConversationEngine:
             menu=self._menu_flag() and not result.quick_actions and not pending_ops,
         )
 
-    async def _pending_previews(self, operation_ids: list[str]) -> list[tuple[str, str]]:
-        """Превью каждой предложенной агентом операции (id → текст с кнопками)."""
+    async def _pending_previews(
+        self, telegram_user_id: int, operation_ids: list[str]
+    ) -> tuple[list[tuple[str, str]], dict | None]:
+        """Превью операций агента; задача без срока откладывается до ответа о сроке."""
         if not operation_ids:
-            return []
+            return [], None
         from jarvis.repositories.pending import PendingOperationRepository
 
         repo = PendingOperationRepository(self._session)
         previews: list[tuple[str, str]] = []
+        due_payload: dict | None = None
         for operation_id in operation_ids:
             operation = await repo.get(uuid.UUID(str(operation_id)))
             if operation is None:
                 continue
+            payload = dict(operation.payload or {})
+            if (
+                operation.operation_type == PendingOpType.CREATE_TASK
+                and payload.get("due_at") is None
+            ):
+                # Превью не показываем: сначала спросим про срок (операцию отменим,
+                # после ответа предложим задачу заново).
+                await self._confirmation.cancel(telegram_user_id, operation.id)
+                if due_payload is None:
+                    due_payload = payload
+                continue
             preview = await render_preview(
                 self._session,
                 operation.operation_type,
-                operation.payload,
+                payload,
                 self._settings.tz,
             )
             previews.append((str(operation_id), preview))
-        return previews
+        return previews, due_payload
 
     # --- Improvement backlog ---
 
@@ -838,7 +907,9 @@ class ConversationEngine:
 
         if op_kind == PendingOpType.CREATE_TASK.value:
             draft_model = TaskDraft.model_validate({**draft})
-            return await self._propose(telegram_user_id, PendingOpType.CREATE_TASK, draft_model)
+            return await self._propose(
+                telegram_user_id, PendingOpType.CREATE_TASK, draft_model, ask_due=False
+            )
         if op_kind == PendingOpType.CREATE_KNOWLEDGE.value:
             draft_model = KnowledgeDraft.model_validate({**draft})
             return await self._propose(

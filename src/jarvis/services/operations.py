@@ -48,6 +48,15 @@ async def apply_operation(
 ) -> AppliedOperation:
     """Применить подтверждённую операцию. Payload валидируется заново."""
     if operation_type == PendingOpType.CREATE_TASK:
+        payload = dict(payload)
+        # Категория могла быть ещё не создана на момент предложения: разрешаем по
+        # имени и создаём при необходимости (пользователь подтвердил и задачу).
+        if not payload.get("category_id") and payload.get("category_name"):
+            repo = CategoryRepository(session)
+            category = await repo.find_by_name(str(payload["category_name"]))
+            if category is None:
+                category = await repo.create(str(payload["category_name"])[:120])
+            payload["category_id"] = str(category.id)
         draft = TaskDraft.model_validate(payload)
         task_id = await TaskService(session).create_from_draft(draft)
         return AppliedOperation(EntityType.TASK, task_id, f"Задача создана: {draft.title}")
@@ -111,8 +120,12 @@ async def apply_operation(
     if operation_type == PendingOpType.CREATE_CATEGORY:
         draft = CategoryDraft.model_validate(payload)
         repo = CategoryRepository(session)
-        if await repo.find_by_name(draft.name) is not None:
-            raise OperationError("Категория с таким названием уже существует")
+        existing = await repo.find_by_name(draft.name)
+        if existing is not None:
+            # Идемпотентно: категорию могла создать привязка задачи чуть раньше.
+            return AppliedOperation(
+                EntityType.CATEGORY, existing.id, f"Категория уже существует: {draft.name}"
+            )
         category = await repo.create(draft.name)
         return AppliedOperation(
             EntityType.CATEGORY, category.id, f"Категория создана: {draft.name}"

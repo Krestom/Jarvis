@@ -20,3 +20,4 @@ class Flow(StrEnum):
     CHOOSE_TASK_FOR_COMMENT = "choose_task_for_comment"
     CHOOSE_DOC_CATEGORY = "choose_doc_category"
     FORCE_SAVE_PENDING = "force_save_pending"
+    AWAIT_TASK_DUE = "await_task_due"

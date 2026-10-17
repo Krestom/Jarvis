@@ -45,6 +45,7 @@ class TaskService:
         await self._ensure_category(draft.category_id)
         fields = draft.model_dump()
         fields.pop("project_name", None)
+        fields.pop("category_name", None)
         fields["project_id"] = await self._resolve_project(draft)
         if fields["status"] == TaskStatus.DONE:
             fields["completed_at"] = datetime.now(UTC)

@@ -317,7 +317,7 @@ async def test_pending_task_rename_via_edit(test_settings, session_factory, sess
     ai.queue(
         Interpretation(
             intent="create_task",
-            entities={"title": "Старая формулировка"},
+            entities={"title": "Старая формулировка", "due_at": "2026-11-01T12:00:00+03:00"},
             confidence=0.9,
         )
     )
@@ -344,8 +344,59 @@ async def test_pending_task_rename_via_edit(test_settings, session_factory, sess
     await session.commit()
     session.expire_all()
 
-    tasks = await TaskRepository(session).list_no_group()
+    tasks = await TaskRepository(session).search("Отчёт по УВ")
     assert [task.title for task in tasks] == ["Отчёт по УВ"]
+
+
+# 5.2. Задача без срока: сначала уточняем, нужен ли срок.
+async def test_pending_task_without_due_asks_deadline(test_settings, session_factory, session):
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="create_task",
+            entities={"title": "Полить цветы"},
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "поставь задачу: полить цветы")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Нужен ли срок" in combined
+    assert not keyboard_messages(messages)  # превью ещё не отправлено
+
+    # «без срока» — задача предлагается к подтверждению как есть.
+    messages = await harness.send_text(DEFAULT_USER_ID, "без срока")
+    assert "Создать задачу?" in " ".join(m.text or "" for m in messages)
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    session.expire_all()
+    tasks = await TaskRepository(session).search("Полить цветы")
+    assert tasks and tasks[0].due_at is None
+
+
+async def test_pending_task_without_due_accepts_date(test_settings, session_factory, session):
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="create_task",
+            entities={"title": "Пересадить цветок"},
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    await harness.send_text(DEFAULT_USER_ID, "поставь задачу: пересадить цветок")
+    messages = await harness.send_text(DEFAULT_USER_ID, "завтра")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Создать задачу?" in combined
+    assert "Дедлайн" in combined  # названная дата попала в превью
+
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    session.expire_all()
+    tasks = await TaskRepository(session).search("Пересадить цветок")
+    assert tasks and tasks[0].due_at is not None
 
 
 # 6. Неавторизованный пользователь не получает доступ.
@@ -363,7 +414,7 @@ async def test_scenario_confirm_is_idempotent(test_settings, session_factory, se
     ai.queue(
         Interpretation(
             intent="create_task",
-            entities={"title": "Один раз"},
+            entities={"title": "Один раз", "due_at": "2026-11-01T12:00:00+03:00"},
             confidence=0.9,
         )
     )

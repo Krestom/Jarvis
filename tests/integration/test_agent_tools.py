@@ -110,14 +110,27 @@ async def test_create_task_with_category(session, test_settings):
     # До подтверждения задачи нет.
     assert await TaskRepository(session).search("Согласовать") == []
 
+    # Категории нет — система сама предлагает её создать и готовит задачу в неё.
     missing = await registry.call("create_task", {"title": "X", "category": "Нет"})
-    assert missing.ok is False
-    assert missing.error_kind == "not_found"
+    assert missing.ok is True
+    assert missing.data["status"] == "confirmation_required"
+    assert missing.data["category"] == "Нет"
+    assert len(registry.pending_operation_ids) == 3  # «Согласовать» + категория + задача
 
-    # Подтверждение создаёт задачу с категорией.
-    outcome = await ConfirmationService(session, test_settings).confirm(
-        USER, registry.pending_operation_ids[0]
-    )
+    confirmation = ConfirmationService(session, test_settings)
+    # Подтверждаем задачу раньше категории: категория создаётся при применении.
+    task_op = registry.pending_operation_ids[-1]
+    assert (await confirmation.confirm(USER, task_op)).ok is True
+    tasks = await TaskRepository(session).search("X")
+    created_category = await CategoryRepository(session).find_by_name("Нет")
+    assert created_category is not None
+    assert tasks and tasks[0].category_id == created_category.id
+
+    # Подтверждение категории после этого идемпотентно (она уже создана задачей).
+    assert (await confirmation.confirm(USER, registry.pending_operation_ids[1])).ok is True
+
+    # Подтверждение создаёт задачу с уже существующей категорией.
+    outcome = await confirmation.confirm(USER, registry.pending_operation_ids[0])
     assert outcome.ok is True
     tasks = await TaskRepository(session).search("Согласовать")
     assert tasks and tasks[0].category_id == category.id

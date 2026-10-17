@@ -716,15 +716,20 @@ class ToolRegistry:
 
     async def _create_task(self, args: CreateTaskArgs) -> ToolResult:
         category_id = None
+        category_name = None
         if args.category:
             category = await CategoryRepository(self._session).find_by_name(args.category)
-            if category is None:
-                return ToolResult.failure(
-                    "not_found",
-                    f"категория «{args.category}» не найдена (можно создать create_category)",
-                    mutating=True,
-                )
-            category_id = category.id
+            if category is not None:
+                category_id = category.id
+            else:
+                # Категории нет: предлагаем её создать (если ещё не предложена) и
+                # привязываем задачу по имени — id разрешится при подтверждении.
+                proposed = await self._create_category(CreateCategoryArgs(name=args.category))
+                created_id = proposed.data.get("category_id")
+                if created_id:
+                    category_id = uuid.UUID(str(created_id))
+                else:
+                    category_name = args.category
         draft = TaskDraft(
             title=args.title,
             description=args.description,
@@ -732,6 +737,7 @@ class ToolRegistry:
             bucket=args.bucket,
             project_name=args.project,
             category_id=category_id,
+            category_name=category_name,
             **({"priority": args.priority} if args.priority else {}),
         )
         result = await self._propose(
@@ -740,6 +746,13 @@ class ToolRegistry:
             summary=f"задача «{args.title}»",
         )
         result.data["title"] = args.title
+        if category_name:
+            result.data["category"] = category_name
+            result.data["note"] = (
+                f"категории «{category_name}» ещё нет: отправлены две кнопки — "
+                "подтверждение создания категории и подтверждение задачи "
+                "(задача встанет в эту категорию)"
+            )
         return result
 
     async def _create_category(self, args: CreateCategoryArgs) -> ToolResult:

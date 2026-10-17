@@ -168,7 +168,9 @@ async def render_preview(
         priority = payload.get("priority")
         if priority and priority != TaskPriority.NORMAL.value:
             lines.append(_line("Приоритет", PRIORITY_LABELS.get(TaskPriority(priority), priority)))
-        category = await _category_name(session, payload.get("category_id"))
+        category = await _category_name(session, payload.get("category_id")) or (
+            payload.get("category_name")
+        )
         lines.append(_line("Категория", category))
         lines.append(_line("Проект", await _project_label(session, payload)))
 

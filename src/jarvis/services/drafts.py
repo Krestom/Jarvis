@@ -33,6 +33,8 @@ class TaskDraft(BaseModel):
     bucket: TaskBucket | None = None
     due_at: datetime | None = None
     category_id: uuid.UUID | None = None
+    # Категорию предложено создать; id разрешается при подтверждении операции.
+    category_name: str | None = Field(default=None, max_length=120)
     project_id: uuid.UUID | None = None
     project_name: str | None = Field(default=None, max_length=200)
 
