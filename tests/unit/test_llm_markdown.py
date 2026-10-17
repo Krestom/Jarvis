@@ -52,6 +52,10 @@ def test_format_rules_present_in_prompts():
     assert "Markdown запрещён" in TELEGRAM_FORMAT_RULES
 
 
+def test_agent_prompt_forbids_service_talk():
+    assert "не упоминай служебные детали" in SYSTEM_HEADER
+
+
 # --- Раскладка (normalize_llm_layout) ----------------------------------------
 
 
