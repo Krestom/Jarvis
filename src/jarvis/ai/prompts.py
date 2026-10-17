@@ -95,7 +95,8 @@ intent:
   entities: target_task.
 - list_tasks — вопросы «какие у меня задачи», «что у меня на неделю/сегодня»,
   «мои задачи». entities: view — один из today, week, long_term, someday,
-  no_group, inbox, done; если пользователь не уточнил период — week.
+  no_group, inbox, all (все незавершённые), done; если пользователь не уточнил
+  период — week.
 - create_knowledge — факт, заметка, инструкция, решение, справочная информация.
   Если пользователь просит сохранить данные В проект («сохрани эти креды в проект
   SuperSport»), заполни entities.project названием проекта — backend создаст

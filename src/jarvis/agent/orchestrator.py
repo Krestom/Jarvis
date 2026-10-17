@@ -20,7 +20,7 @@ from jarvis.agent.budget import (
 from jarvis.agent.prompts import build_context_block, build_system_prompt
 from jarvis.agent.queue import QueueTimeout, RequestHandle, UserSessionGate
 from jarvis.agent.routing import AGENT_FLOW, build_profile, detect_profile
-from jarvis.agent.schemas import EntityCandidate
+from jarvis.agent.schemas import EntityCandidate, OutgoingFile
 from jarvis.agent.tools import ToolRegistry, ToolResult
 from jarvis.ai import AIError, AIProvider, AIUnavailableError, InterpreterContext
 from jarvis.ai.prompts import format_llm_text
@@ -58,6 +58,8 @@ class AgentResult:
     surfaced: list[EntityCandidate] = field(default_factory=list)
     # Детерминированный экран, который попросил открыть агент (name, params).
     screen: tuple[str, dict] | None = None
+    # Файлы к отправке в чат (документ, экспорт чата) — собираются инструментами.
+    files: list[OutgoingFile] = field(default_factory=list)
     # Текст исходного запроса — для короткой памяти диалога.
     request_text: str = ""
 
@@ -231,6 +233,7 @@ class AgentService:
         result.tokens = budget.tokens if budget.has_usage_data else None
         result.pending_operation_ids = list(registry.pending_operation_ids)
         result.surfaced = registry.surfaced
+        result.files = list(registry.outgoing_files)
         if not result.text:
             result.text = "Не получилось сформулировать ответ. Попробуйте переформулировать запрос."
         return result

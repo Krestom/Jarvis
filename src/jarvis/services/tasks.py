@@ -12,7 +12,7 @@ from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import TaskDraft, TaskUpdate
 from jarvis.services.errors import NotFoundError, OperationError
 
-TASK_VIEWS = ("today", "week", "long_term", "someday", "no_group", "inbox", "done")
+TASK_VIEWS = ("today", "week", "long_term", "someday", "no_group", "inbox", "all", "done")
 
 
 class TaskService:
@@ -100,6 +100,8 @@ class TaskService:
             return await self._repo.list_no_group(limit=limit, offset=offset)
         if view == "inbox":
             return await self._repo.list_inbox(limit=limit, offset=offset)
+        if view == "all":
+            return await self._repo.list_all(limit=limit, offset=offset)
         if view == "done":
             return await self._repo.list_done(limit=limit, offset=offset)
         raise OperationError(f"Неизвестный список задач: {view}")

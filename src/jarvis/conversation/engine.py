@@ -72,6 +72,7 @@ TASK_VIEW_LABELS = {
     "someday": "Когда-нибудь",
     "no_group": "Без срока",
     "inbox": "Inbox",
+    "all": "Все задачи",
     "done": "Выполненные",
 }
 
@@ -101,6 +102,8 @@ class EngineOutcome:
     task_choices: list = field(default_factory=list)
     task_choices_action: str = "comment_choose"
     task_choices_prompt: str | None = None
+    # Файлы (документы, экспорт чата), которые агент отдаёт вместе с ответом.
+    files: list = field(default_factory=list)
 
 
 class ConversationEngine:
@@ -726,6 +729,7 @@ class ConversationEngine:
                 candidate.model_dump(mode="json") for candidate in result.entity_choices
             ],
             entity_choice_prompt=result.choice_prompt,
+            files=list(result.files),
             menu=self._menu_flag() and not result.quick_actions and not pending_ops,
         )
 

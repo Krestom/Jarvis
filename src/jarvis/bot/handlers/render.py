@@ -6,7 +6,7 @@ import logging
 import re
 
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 
 from jarvis.bot.formatting import esc, split_message
 from jarvis.bot.keyboards import (
@@ -85,6 +85,13 @@ async def send_outcome(message: Message, outcome: EngineOutcome) -> None:
             await answer_safe(
                 message, chunk, reply_markup=markup if index == len(chunks) - 1 else None
             )
+
+    # Файлы, которые агент подготовил инструментами (документ, экспорт чата).
+    for file in outcome.files:
+        await message.answer_document(
+            BufferedInputFile(file.data, filename=file.filename),
+            caption=file.caption or None,
+        )
 
     # Каждая предложенная операция — отдельное превью с кнопками подтверждения.
     for op_id, preview in outcome.pending_ops:

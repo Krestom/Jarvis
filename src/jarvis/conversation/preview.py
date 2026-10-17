@@ -267,9 +267,16 @@ async def render_preview(
             lines.append("Документ не найден.\n")
         else:
             lines.append(_line("Документ", document.title))
-            old = await _category_name(session, document.category_id)
-            new = await _category_name(session, payload.get("category_id"))
-            lines.append(_line("Категория", f"{old or 'нет'} → {new or 'нет'}"))
+            if "category_id" in payload:
+                old = await _category_name(session, document.category_id)
+                new = await _category_name(session, payload.get("category_id"))
+                lines.append(_line("Категория", f"{old or 'нет'} → {new or 'нет'}"))
+            if payload.get("sensitivity"):
+                old = SENSITIVITY_LABELS.get(document.sensitivity, document.sensitivity.value)
+                new = SENSITIVITY_LABELS.get(
+                    Sensitivity(payload["sensitivity"]), payload["sensitivity"]
+                )
+                lines.append(_line("Чувствительность", f"{old} → {new}"))
 
     elif operation_type in (
         PendingOpType.DELETE_TASK,

@@ -135,6 +135,17 @@ class TaskRepository:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_all(self, *, limit: int = 20, offset: int = 0) -> list[Task]:
+        """Все незавершённые задачи одним списком («покажи все задачи»)."""
+        stmt = (
+            select(Task)
+            .where(*_active())
+            .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def list_due_between(
         self, start: datetime, end: datetime, *, limit: int = 20, offset: int = 0
     ) -> list[Task]:

@@ -97,10 +97,11 @@ class DocumentDraft(BaseModel):
 
 
 class DocumentUpdate(BaseModel):
-    """Изменение метаданных документа (сейчас — категория-папка)."""
+    """Изменение метаданных документа (категория-папка, чувствительность)."""
 
     document_id: uuid.UUID
     category_id: uuid.UUID | None = None
+    sensitivity: Sensitivity | None = None
 
 
 class SecretCreateDraft(BaseModel):

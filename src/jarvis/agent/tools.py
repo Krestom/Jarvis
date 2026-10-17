@@ -11,13 +11,14 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jarvis.agent.schemas import EntityCandidate
+from jarvis.agent.schemas import EntityCandidate, OutgoingFile
 from jarvis.config.settings import Settings
 from jarvis.domain.buckets import DONE_STATUSES
 from jarvis.domain.enums import (
@@ -92,7 +93,7 @@ class ToolSpec:
 
 class ListTasksArgs(BaseModel):
     view: str = Field(
-        default="week", description="today|week|long_term|someday|no_group|inbox|done"
+        default="week", description="today|week|long_term|someday|no_group|inbox|all|done"
     )
     limit: int = Field(default=10, ge=1, le=30)
     offset: int = Field(default=0, ge=0)
@@ -215,6 +216,12 @@ class ListImprovementsArgs(BaseModel):
     limit: int = Field(default=10, ge=1, le=20)
 
 
+class ExportChatArgs(BaseModel):
+    day: date | None = Field(
+        default=None, description="День (YYYY-MM-DD); по умолчанию — сегодня"
+    )
+
+
 class CreateKnowledgeArgs(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     content: str = Field(min_length=1, max_length=8000, description="Суть записи, дословно")
@@ -242,6 +249,17 @@ class UpdateKnowledgeArgs(BaseModel):
     )
 
 
+class SendDocumentArgs(BaseModel):
+    document_id: uuid.UUID = Field(description="id документа (kind=document из search_all)")
+
+
+class UpdateDocumentArgs(BaseModel):
+    document_id: uuid.UUID = Field(description="id документа (kind=document из search_all)")
+    sensitive: bool = Field(
+        description="true — пометить чувствительным, false — обычным (снимает защиту)"
+    )
+
+
 @dataclass(frozen=True)
 class ToolMeta:
     args_model: type[BaseModel]
@@ -254,8 +272,9 @@ _TOOLS: dict[str, ToolMeta] = {
     "list_tasks": ToolMeta(
         ListTasksArgs,
         "Список задач по динамическому представлению (today — включая просроченные, "
-        "week, long_term, someday, no_group, inbox, done). Вместо view можно указать "
-        "on_date (задачи на конкретный день) или category (категория-папка). Данные из базы.",
+        "week, long_term, someday, no_group, inbox, all — все незавершённые, done). "
+        "Вместо view можно указать on_date (задачи на конкретный день) или category "
+        "(категория-папка). Данные из базы.",
         mutating=False,
         risk="low",
     ),
@@ -349,6 +368,14 @@ _TOOLS: dict[str, ToolMeta] = {
         mutating=False,
         risk="low",
     ),
+    "send_document": ToolMeta(
+        SendDocumentArgs,
+        "Отправить пользователю файл документа вложением (расшифровывается на время "
+        "отправки). Вызывай, когда просят выдать/прислать/вывести найденный документ "
+        "файлом. Файл уйдёт в чат сразу вместе с ответом.",
+        mutating=False,
+        risk="low",
+    ),
     "web_search": ToolMeta(
         WebSearchArgs,
         "Внешний веб-поиск. Только когда нужны внешние факты (документация, "
@@ -375,6 +402,14 @@ _TOOLS: dict[str, ToolMeta] = {
         mutating=False,
         risk="low",
     ),
+    "export_chat": ToolMeta(
+        ExportChatArgs,
+        "Выгрузить журнал диалога за день двумя файлами (Markdown + JSON) — они "
+        "уйдут в чат вместе с ответом. Текст уже с маскировкой секретов. Используй, "
+        "когда просят экспортировать/выгрузить переписку.",
+        mutating=False,
+        risk="low",
+    ),
     "create_knowledge": ToolMeta(
         CreateKnowledgeArgs,
         "Сохранить запись знаний (заметку/инструкцию/решение) в базу, при желании — "
@@ -389,6 +424,14 @@ _TOOLS: dict[str, ToolMeta] = {
         "уровень чувствительности. Отправляет превью с кнопкой подтверждения — "
         "изменение применится после нажатия. Работает и с чувствительными "
         "заметками; указывай только те поля, которые меняешь.",
+        mutating=True,
+        risk="medium",
+    ),
+    "update_document": ToolMeta(
+        UpdateDocumentArgs,
+        "Изменить уровень чувствительности документа по id (из search_all). "
+        "Отправляет превью с кнопкой подтверждения — изменение применится после "
+        "нажатия.",
         mutating=True,
         risk="medium",
     ),
@@ -415,6 +458,8 @@ class ToolRegistry:
         self.surfaced: list[EntityCandidate] = []
         # Все pending-операции, предложенные за этот запрос (каждой нужна кнопка).
         self.pending_operation_ids: list[str] = []
+        # Файлы к отправке в чат (документ, экспорт чата) — уйдут с ответом.
+        self.outgoing_files: list[OutgoingFile] = []
 
     def catalog(self) -> list[ToolSpec]:
         return [
@@ -713,6 +758,66 @@ class ToolRegistry:
             },
         )
 
+    async def _send_document(self, args: SendDocumentArgs) -> ToolResult:
+        from jarvis.documents.storage import EncryptedFileStorage
+        from jarvis.services.documents import TELEGRAM_SEND_LIMIT, DocumentService
+
+        storage = EncryptedFileStorage(
+            self._settings.document_storage_path, self._settings.document_keyring()
+        )
+        document, data = await DocumentService(
+            self._session, self._settings, storage
+        ).read_file(args.document_id)
+        if len(data) > TELEGRAM_SEND_LIMIT:
+            return ToolResult.failure(
+                "unsupported", "файл слишком большой для отправки через Telegram"
+            )
+        filename = (
+            PurePosixPath(document.original_filename).name
+            if document.original_filename
+            else f"{document.title}.bin"
+        )
+        self.outgoing_files.append(
+            OutgoingFile(
+                filename=filename,
+                data=data,
+                caption="📤 Файл расшифрован для отправки. Удалите сообщение после использования.",
+            )
+        )
+        return ToolResult(
+            ok=True,
+            data={
+                "title": document.title,
+                "filename": filename,
+                "size_bytes": len(data),
+                "note": "файл отправится в чат вместе с ответом",
+            },
+        )
+
+    async def _export_chat(self, args: ExportChatArgs) -> ToolResult:
+        from jarvis.services.chatlog import export_chat_day
+
+        day = args.day or datetime.now(self._settings.tz).date()
+        result = await export_chat_day(self._session, self._settings, day)
+        stamp = day.strftime("%Y%m%d")
+        self.outgoing_files.append(
+            OutgoingFile(filename=f"jarvis_chat_{stamp}.md", data=result.markdown.encode("utf-8"))
+        )
+        self.outgoing_files.append(
+            OutgoingFile(
+                filename=f"jarvis_chat_{stamp}.json", data=result.json_text.encode("utf-8")
+            )
+        )
+        return ToolResult(
+            ok=True,
+            data={
+                "date": day.isoformat(),
+                "message_count": result.message_count,
+                "truncated": result.truncated,
+                "note": "два файла (MD и JSON) отправятся в чат вместе с ответом",
+            },
+        )
+
     async def _web_search(self, args: WebSearchArgs) -> ToolResult:
         limit = min(args.limit, self._settings.web_search_max_results)
         results = await self._search_provider.search(args.query, limit=limit)
@@ -958,6 +1063,21 @@ class ToolRegistry:
             summary=f"запись «{item.title}»",
         )
         result.data["changes"] = sorted(changes)
+        return result
+
+    async def _update_document(self, args: UpdateDocumentArgs) -> ToolResult:
+        from jarvis.repositories.documents import DocumentRepository
+
+        document = await DocumentRepository(self._session).get(args.document_id)
+        if document is None:
+            return ToolResult.failure("not_found", "документ не найден", mutating=True)
+        sensitivity = Sensitivity.SENSITIVE if args.sensitive else Sensitivity.NORMAL
+        result = await self._propose(
+            PendingOpType.UPDATE_DOCUMENT,
+            {"document_id": str(args.document_id), "sensitivity": sensitivity.value},
+            summary=f"документ «{document.title}»",
+        )
+        result.data["changes"] = ["sensitivity"]
         return result
 
     async def _delete_task(self, args: DeleteTaskArgs) -> ToolResult:

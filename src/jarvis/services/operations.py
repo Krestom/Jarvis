@@ -174,11 +174,19 @@ async def apply_operation(
         document = await repo.get(update.document_id)
         if document is None:
             raise NotFoundError("Документ не найден")
-        if update.category_id is not None and (
-            await CategoryRepository(session).get(update.category_id) is None
-        ):
-            raise OperationError("Категория не найдена")
-        await repo.update(document, category_id=update.category_id)
+        # Меняем только явно переданные поля: category_id (с возможной очисткой)
+        # или sensitivity — превью и payload задают ровно одно из них.
+        fields: dict = {}
+        if "category_id" in update.model_fields_set:
+            if update.category_id is not None and (
+                await CategoryRepository(session).get(update.category_id) is None
+            ):
+                raise OperationError("Категория не найдена")
+            fields["category_id"] = update.category_id
+        if update.sensitivity is not None:
+            fields["sensitivity"] = update.sensitivity
+        if fields:
+            await repo.update(document, **fields)
         return AppliedOperation(EntityType.DOCUMENT, document.id, "Документ обновлён")
 
     if operation_type == PendingOpType.DELETE_DOCUMENT:

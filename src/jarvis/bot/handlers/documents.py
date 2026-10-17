@@ -30,13 +30,10 @@ from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.services.catalog import CatalogService
-from jarvis.services.documents import DocumentService
+from jarvis.services.documents import TELEGRAM_SEND_LIMIT, DocumentService
 from jarvis.services.errors import OperationError
 
 log = logging.getLogger(__name__)
-
-
-TELEGRAM_SEND_LIMIT = 48 * 1024 * 1024  # запас под 50 МБ лимит Bot API
 
 
 def build_storage(settings: Settings) -> EncryptedFileStorage:

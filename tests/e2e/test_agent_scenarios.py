@@ -14,6 +14,7 @@ from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import KnowledgeSource, KnowledgeType, TaskBucket
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
+from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.improvements import ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.tasks import TaskRepository
@@ -398,6 +399,107 @@ async def test_agent_opens_search_screen(test_settings, session_factory, session
     combined = " ".join(m.text or "" for m in messages)
     assert "Результаты по запросу" in combined
     assert "Резервное копирование" in combined
+
+
+async def test_agent_opens_all_tasks_screen(test_settings, session_factory, session):
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="Починить сервер", bucket=TaskBucket.WEEK)
+    )
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="Разобрать полку", bucket=None)
+    )
+    await session.commit()
+    ai = FakeProvider()
+    ai.queue_plan(
+        PlanStep(
+            type="reply",
+            text="Открываю все задачи.",
+            ui=ScreenRequest(component="screen", name="tasks", params={"view": "all"}),
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "покажи все задачи списком")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Все задачи" in combined
+    assert "Починить сервер" in combined
+    assert "Разобрать полку" in combined
+    assert keyboard_messages(messages)  # кликабельные карточки
+
+
+async def test_agent_exports_chat_as_files(test_settings, session_factory, session):
+    ai = FakeProvider()
+    ai.queue_plan(PlanStep(type="tool_call", tool="export_chat", args={}))
+    ai.queue_plan(PlanStep(type="reply", text="Готово: журнал за сегодня во вложениях."))
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "экспортируй чат за сегодня")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Готово" in combined
+    sent = [m for m in messages if m.document is not None]
+    assert len(sent) == 2
+    names = sorted(m.document.file_name for m in sent)
+    assert names[0].startswith("jarvis_chat_") and names[0].endswith(".json")
+    assert names[1].startswith("jarvis_chat_") and names[1].endswith(".md")
+
+
+async def test_agent_sends_found_document_as_file(test_settings, session_factory, session):
+    ai = FakeProvider()
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_document(
+        DEFAULT_USER_ID, filename="passport.pdf", content=b"%PDF-1.4 data"
+    )
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    document = (await DocumentRepository(session).list_active())[0]
+
+    ai.queue_plan(
+        PlanStep(
+            type="tool_call",
+            tool="send_document",
+            args={"document_id": str(document.id)},
+        )
+    )
+    ai.queue_plan(PlanStep(type="reply", text="Отправляю файл «passport»."))
+    messages = await harness.send_text(DEFAULT_USER_ID, "выведи тестовый документ файлом")
+
+    sent = [m for m in messages if m.document is not None]
+    assert len(sent) == 1
+    assert sent[0].document.file_name == "passport.pdf"
+
+
+async def test_agent_changes_document_sensitivity(test_settings, session_factory, session):
+    ai = FakeProvider()
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_document(
+        DEFAULT_USER_ID, filename="passport.pdf", content=b"%PDF-1.4 data"
+    )
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+    document = (await DocumentRepository(session).list_active())[0]
+    assert document.sensitivity.value == "sensitive"
+
+    ai.queue_plan(
+        PlanStep(
+            type="tool_call",
+            tool="update_document",
+            args={"document_id": str(document.id), "sensitive": False},
+        )
+    )
+    ai.queue_plan(PlanStep(type="reply", text="Подготовил смену чувствительности."))
+    proposal = await harness.send_text(
+        DEFAULT_USER_ID, "сделай тестовый документ нечувствительным"
+    )
+    combined = " ".join(m.text or "" for m in proposal)
+    assert "Обновить документ?" in combined
+    assert "чувствительная → обычная" in combined
+
+    await confirm_last(harness, DEFAULT_USER_ID, proposal)
+    await session.commit()
+    await session.refresh(document)
+    assert document.sensitivity.value == "normal"
 
 
 async def test_agent_keeps_last_turns_in_context(test_settings, session_factory, session):

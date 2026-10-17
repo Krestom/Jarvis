@@ -208,7 +208,7 @@ def register_tools(
         title="Поиск задач",
         description=(
             "Найти задачи по тексту и/или списку. view: today, week, long_term, "
-            "someday, no_group, inbox, done."
+            "someday, no_group, inbox, all, done."
         ),
     )
     async def search_tasks(query: str = "", view: str = "", limit: int = 10) -> dict[str, Any]:

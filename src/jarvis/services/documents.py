@@ -17,6 +17,9 @@ from jarvis.services.errors import NotFoundError, OperationError
 
 log = logging.getLogger(__name__)
 
+# Запас под 50 МБ лимит Bot API: больше отправить одним документом нельзя.
+TELEGRAM_SEND_LIMIT = 48 * 1024 * 1024
+
 ALLOWED_DOCUMENT_MIME_PREFIXES = (
     "image/",
     "application/pdf",

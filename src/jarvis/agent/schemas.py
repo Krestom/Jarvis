@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -16,4 +17,13 @@ class EntityCandidate(BaseModel):
     title: str = Field(max_length=300)
 
 
-__all__ = ["EntityCandidate"]
+@dataclass
+class OutgoingFile:
+    """Файл, который инструмент агента отдаёт в чат вместе с ответом."""
+
+    filename: str
+    data: bytes
+    caption: str = ""
+
+
+__all__ = ["EntityCandidate", "OutgoingFile"]

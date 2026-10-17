@@ -60,12 +60,13 @@ bot/handlers/free_text.py ──► conversation/engine.py  (роутинг)
 
 | Инструмент | Тип | Риск | Назначение |
 |---|---|---|---|
-| `list_tasks` | read | low | списки (today/week/…/done), на дату (`on_date`), по категории (`category`) |
+| `list_tasks` | read | low | списки (today/week/…/done + `all` — все незавершённые), на дату (`on_date`), по категории (`category`) |
 | `list_project_tasks` | read | low | незавершённые задачи проекта по названию |
 | `search_tasks` | read | low | FTS + подстрочный поиск задач |
 | `get_task` | read | low | карточка задачи + последние комментарии |
 | `search_all` | read | low | знания + задачи + документы |
 | `get_knowledge` | read | low | полный текст записи знаний (в т.ч. чувствительных) |
+| `send_document` | read | low | файл документа вложением в чат (расшифровка на время отправки) |
 | `list_projects` | read | low | проекты (id/названия) |
 | `create_task` | mutation | low | превью + кнопка: задача создаётся после подтверждения |
 | `create_category` | mutation | low | превью + кнопка; идемпотентно (уже есть / уже предложена) |
@@ -74,15 +75,21 @@ bot/handlers/free_text.py ──► conversation/engine.py  (роутинг)
 | `delete_task` | mutation | **high** | только отправляет pending-подтверждение |
 | `create_knowledge` | mutation | medium | превью + кнопка: заметка (sensitive=true для кредов) |
 | `update_knowledge` | mutation | medium | превью + кнопка: правка заметки (заголовок/сводка/текст/категория/проект/чувствительность), работает и с sensitive |
+| `update_document` | mutation | medium | превью + кнопка: уровень чувствительности документа |
 | `web_search` | read | low | внешний поиск (Tavily; источники указываются в ответе) |
 | `report_capability_gap` | mutation | low | запись пробела в improvement backlog |
 | `list_improvements` | read | low | чтение backlog (для «покажи бэклог») |
+| `export_chat` | read | low | журнал диалога за день (MD + JSON) файлами в чат |
+
+Файлы, подготовленные `send_document`/`export_chat`, уходят в чат вложениями
+сразу после текста ответа (поле `files` результата агента → `EngineOutcome`).
 
 Ошибки различаются по видам: `validation`, `not_found`, `unsupported`,
 `transient` (единственный вид, который повторяется — до
 `AGENT_MAX_TOOL_RETRIES`), `internal` (детали не утекают в LLM, только в логи).
 
-Высокий риск (`delete_task`) и правки (`create_knowledge`, `update_knowledge`)
+Высокий риск (`delete_task`) и правки (`create_knowledge`, `update_knowledge`,
+`update_document`)
 не применяются сразу: создаётся pending-операция Stage 1, пользователю приходит
 превью с кнопкой «Подтвердить / Изменить / Отменить»; подтверждение привязано к
 пользователю и истекает по TTL. Если за один запрос предложено несколько

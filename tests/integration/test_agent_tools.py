@@ -433,3 +433,92 @@ async def test_create_knowledge_tool_needs_confirmation_and_flags_secrets(
         "create_knowledge", {"title": "Мысль о бэкапах", "content": "Проверить rsync ночью"}
     )
     assert plain.data["sensitivity"] == "normal"
+
+
+async def test_list_tasks_all_view_returns_every_active(session, test_settings):
+    from jarvis.domain.enums import TaskBucket, TaskStatus
+
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="На неделе", bucket=TaskBucket.WEEK)
+    )
+    await TaskService(session).create_from_draft(TaskDraft(title="Без группы", bucket=None))
+    done_id = await TaskService(session).create_from_draft(TaskDraft(title="Сделано"))
+    await TaskService(session).apply_update(done_id, {"status": TaskStatus.DONE})
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call("list_tasks", {"view": "all"})
+    assert result.ok is True
+    titles = {item["title"] for item in result.data["items"]}
+    assert titles == {"На неделе", "Без группы"}
+
+
+async def test_export_chat_tool_queues_two_files(session, test_settings):
+    from jarvis.services.chatlog import ChatLogService
+
+    await ChatLogService(session, test_settings).record(USER, direction="in", text="привет")
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call("export_chat", {})
+    assert result.ok is True
+    assert result.data["message_count"] == 1
+    names = [file.filename for file in registry.outgoing_files]
+    assert len(names) == 2
+    assert names[0].endswith(".md") and names[1].endswith(".json")
+    assert "привет" in registry.outgoing_files[0].data.decode("utf-8")
+
+
+async def test_send_document_tool_reads_encrypted_file(session, test_settings):
+    from jarvis.documents.storage import EncryptedFileStorage
+    from jarvis.services.documents import DocumentService
+
+    storage = EncryptedFileStorage(
+        test_settings.document_storage_path, test_settings.document_keyring()
+    )
+    document = await DocumentService(session, test_settings, storage).stage_upload(
+        data=b"%PDF-1.4 test bytes",
+        original_filename="passport.pdf",
+        mime_type="application/pdf",
+    )
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call("send_document", {"document_id": str(document.id)})
+    assert result.ok is True
+    assert result.data["filename"] == "passport.pdf"
+    assert len(registry.outgoing_files) == 1
+    assert registry.outgoing_files[0].data == b"%PDF-1.4 test bytes"
+
+    missing = await registry.call("send_document", {"document_id": str(uuid.uuid4())})
+    assert missing.ok is False and missing.error_kind == "not_found"
+
+
+async def test_update_document_sensitivity_needs_confirmation(session, test_settings):
+    from jarvis.documents.storage import EncryptedFileStorage
+    from jarvis.repositories.documents import DocumentRepository
+    from jarvis.services.confirmation import ConfirmationService
+    from jarvis.services.documents import DocumentService
+
+    storage = EncryptedFileStorage(
+        test_settings.document_storage_path, test_settings.document_keyring()
+    )
+    document = await DocumentService(session, test_settings, storage).stage_upload(
+        data=b"bytes", original_filename="file.pdf", mime_type="application/pdf"
+    )
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call(
+        "update_document", {"document_id": str(document.id), "sensitive": False}
+    )
+    assert result.ok is True
+    assert result.data["status"] == "confirmation_required"
+    # До подтверждения чувствительность не меняется.
+    assert (await DocumentRepository(session).get(document.id)).sensitivity.value == "sensitive"
+
+    await ConfirmationService(session, test_settings).confirm(
+        USER, registry.pending_operation_ids[-1]
+    )
+    assert (await DocumentRepository(session).get(document.id)).sensitivity.value == "normal"
+
+    missing = await registry.call(
+        "update_document", {"document_id": str(uuid.uuid4()), "sensitive": True}
+    )
+    assert missing.ok is False and missing.error_kind == "not_found"
