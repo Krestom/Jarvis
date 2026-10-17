@@ -94,7 +94,7 @@ def task_card_text(task, tz: ZoneInfo, category_name: str | None = None) -> str:
         original = task.original_text.strip()
         if len(original) > 200:
             original = original[:199] + "…"
-        lines.append(f"\n<blockquote><i>Исходная формулировка: {esc(original)}</i></blockquote>")
+        lines.append(f"\n<i>Исходная формулировка: {esc(original)}</i>")
     return "\n".join(lines)
 
 
@@ -132,7 +132,7 @@ def document_card_text(document, category_name: str | None = None) -> str:
     lines.append(f"<b>Размер:</b> {size_kb:.1f} КБ")
     if document.mime_type:
         lines.append(f"<b>Тип файла:</b> {esc(document.mime_type)}")
-    lines.append("\n<blockquote><i>Файл хранится в зашифрованном виде.</i></blockquote>")
+    lines.append("\n<i>Файл хранится в зашифрованном виде.</i>")
     return "\n".join(lines)
 
 
@@ -145,8 +145,5 @@ def secret_card_text(secret, project_name: str | None = None) -> str:
         lines.append(f"<b>Назначение:</b> {esc(secret.purpose)}")
     if project_name:
         lines.append(f"<b>Проект:</b> {esc(project_name)}")
-    lines.append(
-        "\n<blockquote><i>Значение хранится в зашифрованном виде и не показывается "
-        "в поиске.</i></blockquote>"
-    )
+    lines.append("\n<i>Значение хранится в зашифрованном виде и не показывается в поиске.</i>")
     return "\n".join(lines)

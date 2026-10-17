@@ -296,10 +296,7 @@ async def render_preview(
         secret_type = payload.get("secret_type")
         if secret_type:
             lines.append(_line("Тип", secret_type))
-        lines.append(
-            "<blockquote><i>Значение хранится в зашифрованном виде и не "
-            "показывается.</i></blockquote>"
-        )
+        lines.append("<i>Значение хранится в зашифрованном виде и не показывается.</i>")
 
     lines.append("\nПодтвердите или отмените операцию.")
     return "".join(line for line in lines if line)
@@ -394,8 +391,7 @@ async def _render_delete_target(
         if document is not None:
             return (
                 _line("Документ", document.title)
-                + "<blockquote><i>Файл будет удалён из хранилища без возможности "
-                "восстановления.</i></blockquote>"
+                + "<i>Файл будет удалён из хранилища без возможности восстановления.</i>"
             )
     elif operation_type == PendingOpType.DELETE_SECRET:
         from jarvis.repositories.secrets import SecretRepository

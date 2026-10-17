@@ -170,7 +170,7 @@ async def test_chat_reply_system_message_contains_format_rules():
     await provider.chat_reply("привет", CTX)
     system_content = captured["body"]["messages"][0]["content"]
     assert "Markdown запрещён" in system_content
-    assert "<blockquote>" in system_content
+    assert "«•»" in system_content
 
 
 async def test_raw_newlines_inside_json_string_are_tolerated():

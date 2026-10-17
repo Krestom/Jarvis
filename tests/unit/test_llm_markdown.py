@@ -58,48 +58,36 @@ def test_format_rules_present_in_prompts():
 def test_glued_bullets_are_split():
     text = "Итог: полезнее.• Меньше задержек. Быстрее.• Только forward secrecy."
     assert normalize_llm_layout(text) == (
-        "Итог: полезнее.\n\n"
-        "<blockquote>• Меньше задержек. Быстрее.\n\n• Только forward secrecy.</blockquote>"
+        "Итог: полезнее.\n\n• Меньше задержек. Быстрее.\n\n• Только forward secrecy."
     )
 
 
-def test_bullet_run_gets_blank_lines_and_quote():
+def test_bullet_run_gets_blank_lines():
     text = "Ключевые изменения:\n• Первый пункт\n• Второй пункт"
-    result = normalize_llm_layout(text)
-    assert result == (
-        "Ключевые изменения:\n\n<blockquote>• Первый пункт\n\n• Второй пункт</blockquote>"
+    assert normalize_llm_layout(text) == (
+        "Ключевые изменения:\n\n• Первый пункт\n\n• Второй пункт"
     )
 
 
-def test_single_bullet_is_not_quoted():
-    text = "Внимание:\n• Один пункт"
-    assert normalize_llm_layout(text) == "Внимание:\n\n• Один пункт"
+def test_single_bullet_gets_blank_line():
+    assert normalize_llm_layout("Внимание:\n• Один пункт") == "Внимание:\n\n• Один пункт"
 
 
-def test_long_bullet_run_uses_expandable_quote():
-    items = "\n".join(f"• пункт {index}" for index in range(1, 8))
-    result = normalize_llm_layout(f"Список:\n{items}")
-    assert result.count("<blockquote expandable>") == 1
-    assert "</blockquote>" in result
+def test_bullet_after_closing_tag_is_split():
+    text = "Итог.<b>приписка</b>• Первый пункт"
+    assert normalize_llm_layout(text) == "Итог.<b>приписка</b>\n\n• Первый пункт"
 
 
-def test_bullets_inside_existing_quote_are_not_nested():
-    text = "<blockquote>• один\n\n• два</blockquote>"
+def test_blockquote_tags_of_model_are_unwrapped():
+    text = "<blockquote>• один\n\n• два</blockquote>\n• три"
     result = normalize_llm_layout(text)
-    assert "<blockquote>• один" in result
-    assert result.count("<blockquote") == 1
-
-
-def test_single_bullet_quote_from_model_is_unwrapped_and_rewrapped():
-    text = "<blockquote>• Первый</blockquote>\n• Второй"
-    result = normalize_llm_layout(text)
-    assert result == "<blockquote>• Первый\n\n• Второй</blockquote>"
+    assert "<blockquote" not in result
+    assert result == "• один\n\n• два\n\n• три"
 
 
 def test_glued_sentences_become_paragraphs():
     text = "Итог сделан.Практический вывод: обновиться стоит.Источники уточнены."
-    result = normalize_llm_layout(text)
-    assert result == (
+    assert normalize_llm_layout(text) == (
         "Итог сделан.\n\nПрактический вывод: обновиться стоит.\n\nИсточники уточнены."
     )
 
@@ -110,7 +98,7 @@ def test_no_extra_blank_lines_and_trailing_spaces():
 
 
 def test_layout_idempotent_for_clean_text():
-    text = "Заголовок\n\n<blockquote>• один\n\n• два</blockquote>\n\nИтог."
+    text = "Заголовок\n\n• один\n\n• два\n\nИтог."
     assert normalize_llm_layout(normalize_llm_layout(text)) == normalize_llm_layout(text)
 
 
@@ -119,24 +107,11 @@ def test_format_llm_text_combines_bold_and_layout():
     assert format_llm_text(text) == "<b>Важно</b>: вывод готов.\n\nДалее детали."
 
 
-def test_blank_line_after_quote_before_text():
-    text = "Список:\n• один\n• два\nИтог."
-    result = normalize_llm_layout(text)
-    assert result.endswith("</blockquote>\n\nИтог.")
-
-
-def test_br_tags_become_newlines_and_quotes():
-    text = (
-        "Вот чем полезен TLS 1.3.<br><br>"
-        "• <b>Скорость</b>: рукопожатие сократилось.<br><br>"
-        "• <b>Безопасность</b>: старые шифры вырезаны.<br><br>"
-        "Источники:<br><br>"
-        "• https://example.com"
-    )
+def test_br_tags_become_newlines():
+    text = "Вступление.<br><br>• Первый пункт<br><br>• Второй пункт"
     result = format_llm_text(text)
     assert "<br" not in result.lower()
-    assert "<blockquote>• <b>Скорость</b>: рукопожатие сократилось." in result
-    assert "</blockquote>\n\nИсточники:" in result
+    assert result == "Вступление.\n\n• Первый пункт\n\n• Второй пункт"
 
 
 def test_single_br_is_line_break():
@@ -145,40 +120,17 @@ def test_single_br_is_line_break():
     )
 
 
-def test_sources_heading_starts_new_paragraph():
-    text = (
-        "Варианты: • Первый рецепт. • Второй рецепт. Обязательно дренаж. "
-        "Источники: • https://a.dom • https://b.dom"
-    )
+def test_inline_sources_become_bullet_lines():
+    text = "Варианты: • Первый. • Второй. Источники: • https://a.dom • https://b.dom"
     result = normalize_llm_layout(text)
-    assert "\n\nИсточники:\n\n<blockquote>• https://a.dom" in result
-    assert result.count("<blockquote>") == 2
-
-
-def test_sources_heading_at_line_start_untouched():
-    text = "Итог.\n\nИсточники:\n\n• https://a.dom"
-    assert normalize_llm_layout(text) == text
-
-
-def test_long_prose_wall_gets_paragraphs():
-    sentence = (
-        "Спатифиллуму нужен рыхлый грунт, который хорошо пропускает воду "
-        "и воздух к корням растения."
+    assert result == (
+        "Варианты:\n\n• Первый.\n\n• Второй. Источники:\n\n"
+        "• https://a.dom\n\n• https://b.dom"
     )
-    text = " ".join([sentence] * 6)
-    result = normalize_llm_layout(text)
-    assert "\n\n" in result
-    assert result.replace("\n\n", " ") == text  # контент не потерян и не искажён
-
-
-def test_short_prose_not_split():
-    text = "Короткий ответ про грунт. И ещё одно предложение."
-    assert normalize_llm_layout(text) == text
 
 
 def test_format_rules_mention_json_newlines():
     assert r"\n" in TELEGRAM_FORMAT_RULES
-    assert "списки не оборачивай" in TELEGRAM_FORMAT_RULES.lower()
     assert "<br>" in TELEGRAM_FORMAT_RULES
+    assert "<blockquote>" not in TELEGRAM_FORMAT_RULES
     assert "сплошным абзацем" in TELEGRAM_FORMAT_RULES
-    assert "Источники" in TELEGRAM_FORMAT_RULES
