@@ -119,10 +119,13 @@ class Settings(BaseSettings):
     # Ключ Tavily для WEB_SEARCH_PROVIDER=tavily.
     tavily_api_key: SecretStr = SecretStr("")
 
-    # --- Уведомления (напоминания о сроках, утренняя сводка) ---
+    # --- Уведомления (напоминания о сроках, сводки) ---
     notify_enabled: bool = True
     notify_due_reminders: bool = True
-    notify_digest_time: str = "08:00"  # локальное время HH:MM (APP_TIMEZONE)
+    # Времена сводок — список HH:MM через запятую (локальное время APP_TIMEZONE).
+    notify_digest_times: str = "08:00,09:00,12:00,15:00,18:00,22:00"
+    # Пред-напоминание за N минут до срока (0 — выключить).
+    notify_before_due_minutes: int = 60
     notify_poll_seconds: int = 60
 
     # --- Workflow TTL ---

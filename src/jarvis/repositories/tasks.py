@@ -158,6 +158,21 @@ class TaskRepository:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def count_completed_between(self, start: datetime, end: datetime) -> int:
+        """Сколько задач закрыто в интервале (для вечерней сводки)."""
+        stmt = (
+            select(func.count())
+            .select_from(Task)
+            .where(
+                Task.deleted_at.is_(None),
+                Task.status == TaskStatus.DONE,
+                Task.completed_at.is_not(None),
+                Task.completed_at >= start,
+                Task.completed_at < end,
+            )
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
+
     async def list_by_category(
         self, category_id: uuid.UUID, *, limit: int = 20, offset: int = 0
     ) -> list[Task]:
