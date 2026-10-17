@@ -9,7 +9,8 @@ from jarvis.ai.provider import InterpreterContext
 TELEGRAM_FORMAT_RULES = r"""\
 Разметка текстов для Telegram: только HTML-теги <b>, <i>, <u>, <s>, <code>,
 <pre>, <blockquote>, <blockquote expandable>, <a href="...">.
-Markdown запрещён (** __ ##, списки через «-»).
+Markdown запрещён (** __ ##, списки через «-»); тег <br> не поддерживается —
+перенос строки задаётся только символом \n.
 
 Структура текста (важно):
 - список — символом «•», каждый пункт с новой строки, между пунктами пустая строка;
@@ -21,6 +22,9 @@ Markdown запрещён (** __ ##, списки через «-»).
 """
 
 _MARKDOWN_BOLD_RE = re.compile(r"\*\*([^\n]+?)\*\*")
+# Модель вместо \n иногда ставит <br>/<br/>/<BR> (Telegram такой тег не умеет):
+# приводим к настоящим переносам до всех правил раскладки.
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 # Склеенные пункты: «…итог.• следующий» → пункт всегда начинает новую строку
 # (без `<`/`>`: чтобы не рвать уже готовые теги вроде `<blockquote>• …`).
 _BULLET_GLUE_RE = re.compile(r"(?<=[^\s<>])[ \t]*•[ \t]*")
@@ -97,6 +101,7 @@ def normalize_llm_layout(text: str) -> str:
     """
     if not text:
         return text
+    text = _BR_RE.sub("\n", text)
     if "•" in text:
         text = _LIST_QUOTE_RE.sub(r"\1", text)
         text = _BULLET_GLUE_RE.sub("\n\n• ", text)

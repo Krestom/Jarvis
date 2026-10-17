@@ -125,6 +125,27 @@ def test_blank_line_after_quote_before_text():
     assert result.endswith("</blockquote>\n\nИтог.")
 
 
+def test_br_tags_become_newlines_and_quotes():
+    text = (
+        "Вот чем полезен TLS 1.3.<br><br>"
+        "• <b>Скорость</b>: рукопожатие сократилось.<br><br>"
+        "• <b>Безопасность</b>: старые шифры вырезаны.<br><br>"
+        "Источники:<br><br>"
+        "• https://example.com"
+    )
+    result = format_llm_text(text)
+    assert "<br" not in result.lower()
+    assert "<blockquote>• <b>Скорость</b>: рукопожатие сократилось." in result
+    assert "</blockquote>\n\nИсточники:" in result
+
+
+def test_single_br_is_line_break():
+    assert normalize_llm_layout("Строка один.<br>Строка два.") == (
+        "Строка один.\nСтрока два."
+    )
+
+
 def test_format_rules_mention_json_newlines():
     assert r"\n" in TELEGRAM_FORMAT_RULES
     assert "списки не оборачивай" in TELEGRAM_FORMAT_RULES.lower()
+    assert "<br>" in TELEGRAM_FORMAT_RULES
