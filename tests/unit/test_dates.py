@@ -52,6 +52,10 @@ def test_end_of_month() -> None:
     assert parse("до конца месяца").date().isoformat() == "2026-10-31"
 
 
+def test_end_of_next_month() -> None:
+    assert parse("срок до конца следующего месяца").date().isoformat() == "2026-11-30"
+
+
 def test_end_of_week() -> None:
     # 2026-10-15 — четверг, конец недели — воскресенье 18.10.
     assert parse("до конца недели").date().isoformat() == "2026-10-18"

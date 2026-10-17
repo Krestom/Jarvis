@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from jarvis.ai.opencode_go import USER_AGENT, OpenCodeGoProvider
+from jarvis.ai.opencode_go import MAX_ANSWER_TOKENS, USER_AGENT, OpenCodeGoProvider
 from jarvis.ai.provider import AIError, InterpreterContext
 
 CTX = InterpreterContext(
@@ -34,6 +34,25 @@ def make_provider(handler, **overrides) -> OpenCodeGoProvider:
 
 def ok_response(content: str) -> httpx.Response:
     return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+
+def responses_ok_response(text: str) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "id": "resp_1",
+            "object": "response",
+            "status": "completed",
+            "output": [
+                {"type": "reasoning", "summary": []},
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}],
+                },
+            ],
+        },
+    )
 
 
 async def test_interpret_parses_json_and_sends_expected_request():
@@ -202,3 +221,37 @@ async def test_long_prompt_is_truncated():
     await provider.interpret("x" * 5000, CTX)
     user_content = captured["body"]["messages"][1]["content"]
     assert len(user_content) <= 1100
+
+
+async def test_responses_protocol_uses_input_and_parses_output_text():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return responses_ok_response(json.dumps({"type": "reply", "text": "Готово."}))
+
+    provider = make_provider(handler, model="gpt-6-luna", protocol="responses")
+    step = await provider.plan(
+        [
+            {"role": "system", "content": "Ты ассистент."},
+            {"role": "user", "content": "привет"},
+        ],
+        CTX,
+    )
+    assert step.type == "reply"
+    assert step.text == "Готово."
+    assert captured["url"].endswith("/responses")
+    assert captured["body"]["input"][1]["content"] == "привет"
+    assert "messages" not in captured["body"]
+    assert "response_format" not in captured["body"]
+    assert captured["body"]["max_output_tokens"] == MAX_ANSWER_TOKENS
+
+
+async def test_responses_protocol_fails_when_no_output_text():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": "resp_2", "output": [{"type": "reasoning"}]})
+
+    provider = make_provider(handler, model="gpt-6-luna", protocol="responses")
+    with pytest.raises(AIError):
+        await provider.plan([{"role": "user", "content": "привет"}], CTX)

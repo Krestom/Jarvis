@@ -62,7 +62,11 @@ def _parse_json_model(content: str, model_cls):
 
 
 class OpenCodeGoClient:
-    """HTTP-клиент chat/completions с повторами и fallback без response_format."""
+    """HTTP-клиент с повторами и fallback без response_format.
+
+    protocol: "chat" — OpenAI-совместимый chat/completions (DeepSeek, GLM, Kimi,
+    MiMo...); "responses" — OpenAI Responses API (GPT-6 Luna, Grok 4.7, Muse Spark).
+    """
 
     def __init__(
         self,
@@ -70,6 +74,7 @@ class OpenCodeGoClient:
         api_key: str,
         base_url: str,
         model: str,
+        protocol: str = "chat",
         timeout_seconds: float = 60.0,
         max_attempts: int = 2,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -78,7 +83,11 @@ class OpenCodeGoClient:
             raise ValueError("OPENCODE_GO_API_KEY is not set")
         if not base_url:
             raise ValueError("OPENCODE_GO_BASE_URL is not set")
-        self._url = base_url.rstrip("/") + "/chat/completions"
+        if protocol not in ("chat", "responses"):
+            raise ValueError(f"unknown protocol: {protocol!r}")
+        suffix = "/responses" if protocol == "responses" else "/chat/completions"
+        self._url = base_url.rstrip("/") + suffix
+        self._protocol = protocol
         self._api_key = api_key
         self._model = model
         self._timeout = timeout_seconds
@@ -101,14 +110,18 @@ class OpenCodeGoClient:
         use_response_format: bool = False,
         max_tokens: int = MAX_ANSWER_TOKENS,
     ) -> ChatResult:
-        payload: dict = {
-            "model": self._model,
-            "messages": messages,
-            "temperature": 0.1,
-            "max_tokens": max_tokens,
-        }
-        if use_response_format and response_format is not None:
-            payload["response_format"] = response_format
+        payload: dict = {"model": self._model}
+        if self._protocol == "responses":
+            # Responses API: input вместо messages; JSON-схему не навязываем —
+            # промпты и так требуют JSON, а разбор устойчив к тексту вокруг.
+            payload["input"] = messages
+            payload["max_output_tokens"] = max_tokens
+        else:
+            payload["messages"] = messages
+            payload["temperature"] = 0.1
+            payload["max_tokens"] = max_tokens
+            if use_response_format and response_format is not None:
+                payload["response_format"] = response_format
 
         last_error: Exception | None = None
         for attempt in range(self._max_attempts):
@@ -142,7 +155,7 @@ class OpenCodeGoClient:
 
             try:
                 data = response.json()
-                content = data["choices"][0]["message"]["content"]
+                content = self._extract_content(data)
             except (ValueError, KeyError, IndexError, TypeError) as error:
                 raise AIError("AI-сервис вернул неожиданный ответ") from error
             if not isinstance(content, str) or not content.strip():
@@ -155,6 +168,18 @@ class OpenCodeGoClient:
 
         raise AIError("AI-сервис недоступен, попробуйте позже") from last_error
 
+    def _extract_content(self, data: dict) -> str:
+        """Текст ответа по правилам выбранного протокола."""
+        if self._protocol == "responses":
+            for item in data.get("output") or []:
+                if item.get("type") != "message":
+                    continue
+                for block in item.get("content") or []:
+                    if block.get("type") == "output_text" and block.get("text"):
+                        return block["text"]
+            raise KeyError("output_text")
+        return data["choices"][0]["message"]["content"]
+
 
 def _usage_tokens(usage: dict[str, Any] | None) -> int | None:
     """Совместимость: см. jarvis.agent.budget.usage_tokens."""
@@ -166,7 +191,7 @@ def _usage_tokens(usage: dict[str, Any] | None) -> int | None:
 
 
 class OpenCodeGoProvider:
-    """AIProvider поверх OpenCode Go (OpenAI-совместимый протокол)."""
+    """AIProvider поверх OpenCode Go (chat/completions или Responses API)."""
 
     def __init__(
         self,
@@ -174,16 +199,19 @@ class OpenCodeGoProvider:
         api_key: str,
         base_url: str,
         model: str,
+        protocol: str = "chat",
         timeout_seconds: float = 60.0,
         max_attempts: int = 2,
         max_context_chars: int = 20000,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.name = f"opencode_go:{model}"
+        self.protocol = protocol
         self._client = OpenCodeGoClient(
             api_key=api_key,
             base_url=base_url,
             model=model,
+            protocol=protocol,
             timeout_seconds=timeout_seconds,
             max_attempts=max_attempts,
             transport=transport,

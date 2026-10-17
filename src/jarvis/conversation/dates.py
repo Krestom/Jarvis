@@ -45,6 +45,8 @@ def parse_human_date(text: str, now: datetime, tz: ZoneInfo) -> tuple[datetime |
         target = today + timedelta(days=(7 - today.weekday()))
     elif "конц" in lowered and "месяц" in lowered:
         target = _last_day_of_month(today)
+        if "следующ" in lowered:
+            target = _last_day_of_month(target + timedelta(days=1))
     elif "конц" in lowered and "недел" in lowered:
         target = today + timedelta(days=(6 - today.weekday()))
     else:

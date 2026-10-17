@@ -218,6 +218,28 @@
 **Что осталось:** живой ретест владельцем; при «ок» — деплой:
 `ssh jarvis-srv` → `cd /opt/jarvis && git pull --ff-only && docker compose up -d --build`.
 
+## Модель: GPT-6 Luna через Responses API (17.10)
+
+**Попытка с Claude Haiku 5.5 не удалась:** модели OpenCode Go говорят на трёх
+протоколах (доки: /docs/go). Claude Haiku, Qwen3.8 Flash/Plus, MiniMax M3 — это
+`anthropic/v1/messages` (адаптера нет; фабрика теперь падает с понятной ошибкой);
+GPT-6 Luna, Grok 4.7, Muse Spark — `openai/v1/responses`; DeepSeek, GLM, MiMo,
+Kimi, Hy, Space Bunny — привычный chat/completions.
+
+**Сделано:** `OpenCodeGoClient`/провайдер получили `protocol` («chat» |
+«responses»): для responses — `input` вместо `messages`, извлечение текста из
+`output[].content[].output_text`, JSON-схему не навязываем. Фабрика
+`create_ai_provider` выбирает протокол по имени модели (карты
+`RESPONSES_PROTOCOL_MODELS` / `ANTHROPIC_PROTOCOL_MODELS`). `.env`:
+`AI_MODEL=gpt-6-luna`.
+
+**Замеры на живых сценариях (было deepseek-v4.1-flash → стало Luna):**
+«найди заметку» ~15 с → 11.4 с (4–5 → 3 вызова); «покажи задачи на неделю»
+~5 с → 2.8 с (1 вызов); «задача в категории ванная» ~9 с → 6.6 с; экраны
+(поиск/задачи) Luna открывает сама; JSON аккуратный. 343 теста, ruff чист;
+тест-бот перезапущен 18:42. Запасные быстрые совместимые кандидаты: glm-5.3-flash,
+space-bunny, mimo-v2.6-flash, hy3 (можно замерить тем же скриптом).
+
 **Правила из задания (действуют):** состав кнопок не менять, тексты кнопок не
 менять (e2e кликают по подстрокам), новых зависимостей не добавлять,
 не коммитить/деплоить без просьбы владельца.
