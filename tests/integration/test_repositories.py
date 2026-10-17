@@ -35,6 +35,7 @@ async def test_task_dynamic_bucket_lists(session):
     await repo.create(title="Сегодня", due_at=NOW.replace(hour=18))
     await repo.create(title="Просрочено", due_at=NOW - timedelta(days=2))
     await repo.create(title="Неделя", due_at=(NOW + timedelta(days=2)).replace(hour=10))
+    await repo.create(title="Месяц", due_at=(NOW + timedelta(days=10)).replace(hour=9))
     await repo.create(title="Долго", bucket=TaskBucket.LONG_TERM)
     await repo.create(title="Когда-нибудь", bucket=TaskBucket.SOMEDAY)
     await repo.create(title="Без группы")
@@ -47,8 +48,13 @@ async def test_task_dynamic_bucket_lists(session):
     assert "Неделя" in week
     assert "Сегодня" not in week
 
+    # Месяц — продолжение недели: дальние дни месяца, но не следующего и не неделя.
+    month = {task.title for task in await repo.list_month(NOW, TZ)}
+    assert month == {"Месяц"}
+
+    # Долгосрочные — группа long_term или срок за пределами текущего месяца.
     long_term = {task.title for task in await repo.list_long_term(NOW, TZ)}
-    assert {"Долго", "Следующий месяц"} <= long_term
+    assert long_term == {"Долго", "Следующий месяц"}
 
     assert [t.title for t in await repo.list_someday()] == ["Когда-нибудь"]
     assert [t.title for t in await repo.list_no_group()] == ["Без группы"]

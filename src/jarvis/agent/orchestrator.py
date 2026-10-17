@@ -361,6 +361,8 @@ class AgentService:
             if category:
                 clean["category"] = category[:120]
             return ("documents", clean)
+        if ui.name == "knowledge":
+            return ("knowledge", {})
         if ui.name == "card":
             kind = str(params.get("kind") or "").strip()
             if kind not in ("task", "knowledge", "document"):

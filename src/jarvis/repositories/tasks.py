@@ -9,7 +9,7 @@ from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.db.models import Task
-from jarvis.domain.buckets import DONE_STATUSES, today_window, week_window
+from jarvis.domain.buckets import DONE_STATUSES, month_window, today_window, week_window
 from jarvis.domain.enums import TaskBucket, TaskStatus
 
 
@@ -79,13 +79,28 @@ class TaskRepository:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_month(
+        self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
+    ) -> list[Task]:
+        """Задачи на остаток месяца (после текущей недели, до конца месяца)."""
+        start, end = month_window(now, tz)
+        stmt = (
+            select(Task)
+            .where(*_active(), Task.due_at >= start, Task.due_at < end)
+            .order_by(Task.due_at.asc(), Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def list_long_term(
         self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
     ) -> list[Task]:
-        _, end_week = week_window(now, tz)
+        """Долгосрочные: группа long_term или срок за пределами текущего месяца."""
+        _, end_month = month_window(now, tz)
         stmt = (
             select(Task)
-            .where(*_active(), or_(Task.bucket == TaskBucket.LONG_TERM, Task.due_at >= end_week))
+            .where(*_active(), or_(Task.bucket == TaskBucket.LONG_TERM, Task.due_at >= end_month))
             .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
             .limit(limit)
             .offset(offset)

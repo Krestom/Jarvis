@@ -716,3 +716,23 @@ async def test_update_improvement_tool_changes_status_directly(session, test_set
         "update_improvement", {"item_id": str(item.id), "status": "nonsense"}
     )
     assert bad.ok is False and bad.error_kind == "validation"
+
+
+async def test_list_tasks_month_view(session, test_settings):
+    from datetime import UTC, datetime, timedelta
+
+    from jarvis.domain.buckets import month_window
+
+    now = datetime.now(UTC)
+    start, end = month_window(now, test_settings.tz)
+    has_window = end - start > timedelta(minutes=2)
+    if has_window:
+        await TaskService(session).create_from_draft(
+            TaskDraft(title="Месячная", due_at=start + timedelta(minutes=1))
+        )
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call("list_tasks", {"view": "month"})
+    assert result.ok is True
+    titles = {item["title"] for item in result.data["items"]}
+    assert titles == ({"Месячная"} if has_window else set())

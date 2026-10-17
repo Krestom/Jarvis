@@ -939,6 +939,24 @@ async def test_scenario_tasks_by_category(classic_settings, session_factory, ses
     assert "Отчёт по УВ" in (harness.current(categories_message).text or "")
 
 
+# 23. Меню задач: месяц вместо Inbox и «Когда-нибудь».
+async def test_tasks_menu_month_view(classic_settings, session_factory, session):
+    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    menu = keyboard_messages(messages)[-1]
+    labels = [button.text for row in menu.reply_markup.inline_keyboard for button in row]
+    assert "📅 В этом месяце" in labels
+    assert "🗓 Долгосрочные" in labels
+    assert "📥 Без срока" in labels
+    assert "🌀 Inbox" not in labels
+    assert "💭 Когда-нибудь" not in labels
+
+    # Кнопка месяца открывает список (классический обработчик TaskListCB).
+    await harness.click_button(DEFAULT_USER_ID, menu, "В этом месяце")
+    assert "📅 В этом месяце" in (harness.current(menu).text or "")
+
+
 # 22. Категории документов: назначение из карточки и просмотр по категории.
 async def test_scenario_document_category_flow(classic_settings, session_factory, session):
     harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())

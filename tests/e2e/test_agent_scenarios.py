@@ -588,6 +588,38 @@ async def test_agent_exports_backlog_as_files(test_settings, session_factory, se
     assert names[1].endswith(".md")
 
 
+async def test_agent_opens_knowledge_screen(test_settings, session_factory, session):
+    await KnowledgeRepository(session).create(
+        type=KnowledgeType.NOTE,
+        title="Резервное копирование",
+        content="Инструкция по бэкапу сервера",
+        source_type=KnowledgeSource.TEXT,
+    )
+    await session.commit()
+    ai = FakeProvider()
+    ai.queue_plan(
+        PlanStep(
+            type="reply",
+            text="Открываю список знаний.",
+            ui=ScreenRequest(component="screen", name="knowledge", params={}),
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "покажи список заметок")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Знания" in combined
+    assert "Резервное копирование" in combined
+    list_message = keyboard_messages(messages)[-1]
+
+    # Кнопка из настоящего списка открывает карточку записи.
+    card = await harness.click_button(
+        DEFAULT_USER_ID, list_message, "1. Резервное копирование"
+    )
+    card_combined = " ".join(m.text or "" for m in card)
+    assert "Инструкция по бэкапу сервера" in card_combined
+
+
 async def test_agent_opens_document_card_with_live_buttons(
     test_settings, session_factory, session
 ):

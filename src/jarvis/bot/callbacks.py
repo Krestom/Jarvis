@@ -13,7 +13,7 @@ class MenuCB(CallbackData, prefix="mn"):
 
 
 class TaskListCB(CallbackData, prefix="tl"):
-    # today | week | long_term | someday | no_group | inbox | all | done | date | category
+    # today | week | month | long_term | someday | no_group | inbox | all | done | date | category
     view: str
     page: int = 0
     value: str = ""  # id категории (view="category") или ISO-дата (view="date")

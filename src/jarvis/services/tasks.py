@@ -12,7 +12,17 @@ from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import TaskDraft, TaskUpdate
 from jarvis.services.errors import NotFoundError, OperationError
 
-TASK_VIEWS = ("today", "week", "long_term", "someday", "no_group", "inbox", "all", "done")
+TASK_VIEWS = (
+    "today",
+    "week",
+    "month",
+    "long_term",
+    "someday",
+    "no_group",
+    "inbox",
+    "all",
+    "done",
+)
 
 
 class TaskService:
@@ -92,6 +102,8 @@ class TaskService:
             return await self._repo.list_today(now, tz, limit=limit, offset=offset)
         if view == "week":
             return await self._repo.list_week(now, tz, limit=limit, offset=offset)
+        if view == "month":
+            return await self._repo.list_month(now, tz, limit=limit, offset=offset)
         if view == "long_term":
             return await self._repo.list_long_term(now, tz, limit=limit, offset=offset)
         if view == "someday":

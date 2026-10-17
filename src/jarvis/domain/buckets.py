@@ -36,6 +36,17 @@ def week_bounds(day: date) -> tuple[date, date]:
     return monday, monday + timedelta(days=6)
 
 
+def month_bounds(day: date) -> tuple[date, date]:
+    """Календарный месяц (первое..последнее число), содержащий день."""
+    first = day.replace(day=1)
+    next_first = (
+        first.replace(year=first.year + 1, month=1)
+        if first.month == 12
+        else first.replace(month=first.month + 1)
+    )
+    return first, next_first - timedelta(days=1)
+
+
 def local_day_start(day: date, tz: ZoneInfo) -> datetime:
     """Полночь указанного дня в таймзоне пользователя (tz-aware)."""
     return datetime.combine(day, time.min, tz)
@@ -80,3 +91,16 @@ def week_window(now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime]:
     end_today = local_day_start(today + timedelta(days=1), tz)
     end_week = local_day_start(sunday + timedelta(days=1), tz)
     return end_today, end_week
+
+
+def month_window(now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime]:
+    """Границы списка «В этом месяце»: (конец недели, конец месяца).
+
+    Неделя показана в своём списке, поэтому месяц — её продолжение.
+    """
+    today = local_date(now, tz)
+    _, sunday = week_bounds(today)
+    _, last_day = month_bounds(today)
+    end_week = local_day_start(sunday + timedelta(days=1), tz)
+    end_month = local_day_start(last_day + timedelta(days=1), tz)
+    return end_week, end_month

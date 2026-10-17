@@ -93,7 +93,8 @@ class ToolSpec:
 
 class ListTasksArgs(BaseModel):
     view: str = Field(
-        default="week", description="today|week|long_term|someday|no_group|inbox|all|done"
+        default="week",
+        description="today|week|month|long_term|someday|no_group|inbox|all|done",
     )
     limit: int = Field(default=10, ge=1, le=30)
     offset: int = Field(default=0, ge=0)
@@ -322,9 +323,9 @@ _TOOLS: dict[str, ToolMeta] = {
     "list_tasks": ToolMeta(
         ListTasksArgs,
         "Список задач по динамическому представлению (today — включая просроченные, "
-        "week, long_term, someday, no_group, inbox, all — все незавершённые, done). "
-        "Вместо view можно указать on_date (задачи на конкретный день) или category "
-        "(категория-папка). Данные из базы.",
+        "week, month — до конца текущего месяца, long_term, someday, no_group, "
+        "inbox, all — все незавершённые, done). Вместо view можно указать on_date "
+        "(задачи на конкретный день) или category (категория-папка). Данные из базы.",
         mutating=False,
         risk="low",
     ),

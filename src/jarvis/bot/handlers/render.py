@@ -158,6 +158,17 @@ async def send_outcome(
             ),
         )
 
+    # Экран «Знания»: настоящие кнопки карточек (как в меню «Знания»).
+    if outcome.knowledge:
+        from jarvis.bot.keyboards import PAGE_SIZE, knowledge_list_keyboard
+
+        await message.answer(
+            "Выберите запись:",
+            reply_markup=knowledge_list_keyboard(
+                outcome.knowledge, 0, has_next=len(outcome.knowledge) >= PAGE_SIZE
+            ),
+        )
+
     if outcome.entity_choices:
         await message.answer(
             outcome.entity_choice_prompt or "Уточните, что имелось в виду:",

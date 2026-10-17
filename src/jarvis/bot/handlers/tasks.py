@@ -37,6 +37,7 @@ from jarvis.services.tasks import TaskService
 VIEW_TITLES = {
     "today": "🔸 Задачи на сегодня",
     "week": "📆 На этой неделе",
+    "month": "📅 В этом месяце",
     "long_term": "🗓 Долгосрочные",
     "someday": "💭 Когда-нибудь",
     "no_group": "📥 Без срока",

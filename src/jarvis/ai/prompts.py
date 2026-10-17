@@ -94,7 +94,7 @@ intent:
   («какие комментарии к задаче X», «покажи комментарии по ...»).
   entities: target_task.
 - list_tasks — вопросы «какие у меня задачи», «что у меня на неделю/сегодня»,
-  «мои задачи». entities: view — один из today, week, long_term, someday,
+  «мои задачи». entities: view — один из today, week, month, long_term, someday,
   no_group, inbox, all (все незавершённые), done; если пользователь не уточнил
   период — week.
 - create_knowledge — факт, заметка, инструкция, решение, справочная информация.

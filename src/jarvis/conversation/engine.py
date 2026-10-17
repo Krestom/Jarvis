@@ -39,6 +39,7 @@ from jarvis.logging_setup import get_correlation_id
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
+from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.catalog import CatalogService
@@ -55,7 +56,7 @@ log = logging.getLogger(__name__)
 
 SEARCH_PAGE_SIZE = 7
 TASK_LIST_LIMIT = 7  # как PAGE_SIZE в bot/keyboards.py (пагинация TaskListCB)
-DOCUMENT_LIST_LIMIT = 7  # как PAGE_SIZE в bot/keyboards.py (пагинация DocListCB)
+LIST_PAGE_LIMIT = 7  # как PAGE_SIZE в bot/keyboards.py (документы/знания, DocListCB/KbListCB)
 
 _TASK_INTENTS = ("create_task",)
 _KNOWLEDGE_INTENTS = ("create_knowledge",)
@@ -70,6 +71,7 @@ def _ui_actions(interpretation: Interpretation) -> list[str]:
 TASK_VIEW_LABELS = {
     "today": "Задачи на сегодня",
     "week": "Задачи на этой неделе",
+    "month": "Задачи в этом месяце",
     "long_term": "Долгосрочные задачи",
     "someday": "Когда-нибудь",
     "no_group": "Без срока",
@@ -108,6 +110,8 @@ class EngineOutcome:
     files: list = field(default_factory=list)
     # Документы для экрана «Список документов» (кнопки карточек).
     documents: list = field(default_factory=list)
+    # Записи для экрана «Знания» (кнопки карточек).
+    knowledge: list = field(default_factory=list)
     # Пагинация списка задач: (view, page, value, has_next) — как в /tasks.
     task_page: tuple[str, int, str, bool] | None = None
     # Карточка сущности, которую просит открыть агент: (kind, id).
@@ -547,6 +551,8 @@ class ConversationEngine:
             return await self._do_search(telegram_user_id, str(params.get("query") or ""), page=0)
         if name == "documents":
             return await self._show_documents(params.get("category"))
+        if name == "knowledge":
+            return await self._show_knowledge_list()
         if name == "card":
             return EngineOutcome(
                 "", card=(str(params.get("kind") or ""), str(params.get("id") or ""))
@@ -612,7 +618,7 @@ class ConversationEngine:
                     menu=self._menu_flag(),
                 )
         documents = await DocumentRepository(self._session).list_active(
-            limit=DOCUMENT_LIST_LIMIT,
+            limit=LIST_PAGE_LIMIT,
             category_id=category.id if category else None,
         )
         title = f"🗂 <b>{html_escape(category.name)}</b>" if category else "📄 <b>Документы</b>"
@@ -628,6 +634,19 @@ class ConversationEngine:
         for index, document in enumerate(documents, start=1):
             lines.append(f"{index}. {html_escape(document.title)}")
         return EngineOutcome("\n".join(lines), documents=documents)
+
+    async def _show_knowledge_list(self) -> EngineOutcome:
+        """Список знаний («покажи список знаний», экран агента knowledge)."""
+        items = await KnowledgeRepository(self._session).list_recent(limit=LIST_PAGE_LIMIT)
+        if not items:
+            return EngineOutcome(
+                "📚 Пока пусто. Напишите заметку — я предложу её сохранить.",
+                menu=self._menu_flag(),
+            )
+        lines = ["📚 <b>Знания</b> (последние записи)", ""]
+        for index, item in enumerate(items, start=1):
+            lines.append(f"{index}. {html_escape(item.title)}")
+        return EngineOutcome("\n".join(lines), knowledge=items)
 
     def _render_task_list(
         self,

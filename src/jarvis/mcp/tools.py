@@ -207,7 +207,7 @@ def register_tools(
         name="search_tasks",
         title="Поиск задач",
         description=(
-            "Найти задачи по тексту и/или списку. view: today, week, long_term, "
+            "Найти задачи по тексту и/или списку. view: today, week, month, long_term, "
             "someday, no_group, inbox, all, done."
         ),
     )

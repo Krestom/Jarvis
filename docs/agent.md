@@ -92,12 +92,31 @@ bot/handlers/free_text.py ──► conversation/engine.py  (роутинг)
 `EngineOutcome`).
 
 Экраны (`ui = {"component": "screen", ...}`) — allow-list в
-`AgentService._validate_screen`: `tasks` (view/on_date/category), `search`
-(query), `documents` (category), `card` (kind=task|knowledge|document + id).
-Сервер строит настоящие списки и карточки с живыми кнопками действий; параметры
-валидируются, неизвестные экраны отбрасываются. Списки задач и документов —
-по 7 на страницу со стрелками «⬅️/➡️» (как в классических `/tasks` и
-`/documents`).
+`AgentService._validate_screen`: `tasks` (view= today/week/month/long_term/
+someday/no_group/inbox/all/done, либо on_date, либо category), `search`
+(query), `documents` (category), `knowledge` (последние записи), `card`
+(kind=task|knowledge|document + id). Сервер строит настоящие списки и карточки
+с живыми кнопками действий; параметры валидируются, неизвестные экраны
+отбрасываются. Списки задач, документов и знаний — по 7 на страницу со стрелками
+«⬅️/➡️» (как в классических `/tasks`, `/documents`, меню «Знания»).
+
+### Покрытие интерфейса (аудит кнопок, 17.10)
+
+Проверено, что каждая кнопка/место бота достижимы агентом (кроме секретов —
+исключены решением владельца):
+
+| Место UI | Кнопки | Чем закрывает агент |
+|---|---|---|
+| Главное меню | 🔎 Поиск, ✅ Задачи, 📚 Знания, 📄 Документы, 🗂 Проекты, ⚙️ Настройки | экраны `search`/`tasks`/`knowledge`/`documents`, `list_projects`+`create_project`, `create_category`+`rename_category` |
+| Меню «Задачи» | Сегодня, На этой неделе, В этом месяце, Долгосрочные, Без срока, Выполненные, По категориям | экран `tasks` (`view`, `category`); `on_date` — для «задачи на 19 октября» |
+| Карточка задачи | изменить срок, группа, завершить/вернуть, комментарии (список/добавить/править), удалить, к спискам | `update_task` (срок/группа/статус), экран `card`, `list_comments`+`add_comment`+`update_comment`, `delete_task` |
+| Знания | список, карточка, полный текст, похожие, удалить | экран `knowledge`, экран `card`, `get_knowledge`, `search_all`, `delete_knowledge` |
+| Документы | список, по категориям, карточка, получить файл, категория, удалить | экраны `documents`/`card`, `send_document`, `update_document`, `delete_document` |
+| Проекты | список, новый проект | `list_projects`, `create_project` (редактирования проектов нет и в UI) |
+| Настройки | категории: новая/переименовать | `create_category`, `rename_category` |
+| Диагностика | backlog, статусы, экспорт, удаление записи | `list_improvements`, `update_improvement`, `export_issues`; экран открывается quick action «🩺 Диагностика». Удаление записей — только в `/diagnostics` (необратимо) |
+| Экспорты | `/export_chat`, `/export_issues` | `export_chat`, `export_issues` |
+| Секреты | все | исключены владельцем (значения не должны проходить через LLM) |
 
 Ошибки различаются по видам: `validation`, `not_found`, `unsupported`,
 `transient` (единственный вид, который повторяется — до
