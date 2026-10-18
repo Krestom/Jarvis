@@ -511,6 +511,29 @@ async def test_scenario_secret_flow(classic_settings, session_factory, session):
     assert any("Ничего не нашёл" in (m.text or "") for m in results)
 
 
+# 8b. Показ секрета: значение с «<»/«>» не ломает сообщение (экранирование).
+async def test_scenario_secret_reveal_escapes_html(classic_settings, session_factory, session):
+    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
+
+    await harness.send_text(DEFAULT_USER_ID, "/secret")
+    await harness.send_text(DEFAULT_USER_ID, "<b>bad</b> & </code>")
+    messages = await harness.send_text(DEFAULT_USER_ID, "секрет с угловыми скобками")
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+
+    preview = messages[-1]
+    await harness.click_button(DEFAULT_USER_ID, preview, "Секреты")
+    list_message = harness.current(preview)
+    opened = await harness.click_button(
+        DEFAULT_USER_ID, list_message, "секрет с угловыми скобками"
+    )
+    card = opened[-1] if opened else harness.current(preview)
+    revealed = await harness.click_button(DEFAULT_USER_ID, card, "Показать значение")
+
+    text = " ".join(message.text or "" for message in revealed)
+    assert "&lt;b&gt;bad&lt;/b&gt; &amp; &lt;/code&gt;" in text  # значение как текст
+    assert "<b>bad</b>" not in text
+
+
 # 9. Комментарии к задаче через карточку: добавить, увидеть, отредактировать.
 async def test_scenario_task_comments_via_card(classic_settings, session_factory, session):
     task_id = await TaskService(session).create_from_draft(

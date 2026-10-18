@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import SecretCB, SecretListCB
-from jarvis.bot.formatting import secret_card_text
+from jarvis.bot.formatting import esc, secret_card_text
 from jarvis.bot.handlers.open_entity import parse_hex_uuid
-from jarvis.bot.handlers.render import propose_and_send, send_outcome
+from jarvis.bot.handlers.render import answer_safe, propose_and_send, send_outcome
 from jarvis.bot.keyboards import (
     PAGE_SIZE,
     main_menu,
@@ -109,9 +109,10 @@ async def secret_action(
             await callback.answer(str(error), show_alert=True)
             return
         await callback.answer("Показываю на 90 секунд")
-        message = await callback.message.answer(
-            f"👁 <b>{secret.name}</b>\n<code>{value}</code>\n\n"
-            "<i>Сообщение будет удалено через 90 секунд. Не пересылайте его.</i>"
+        message = await answer_safe(
+            callback.message,
+            f"👁 <b>{esc(secret.name)}</b>\n<code>{esc(value)}</code>\n\n"
+            "<i>Сообщение будет удалено через 90 секунд. Не пересылайте его.</i>",
         )
         asyncio.create_task(_delete_later(message, REVEAL_LIFETIME_SECONDS))
         return

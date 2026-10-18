@@ -32,19 +32,20 @@ _NOT_MODIFIED_MARKER = "message is not modified"
 _TAG_RE = re.compile(r"</?[a-zA-Z][^>]{0,80}>")
 
 
-async def answer_safe(message: Message, text: str, **kwargs) -> None:
+async def answer_safe(message: Message, text: str, **kwargs) -> Message:
     """Отправить текст; при ошибке HTML-парсинга — повторить без разметки.
 
     Динамический текст (ответы агента, фрагменты данных) может содержать «<»,
     который Telegram отвергает как тег, — сообщение не должно теряться совсем.
+    Возвращает отправленное сообщение (нужно сценарию показа секрета).
     """
     try:
-        await message.answer(text, **kwargs)
+        return await message.answer(text, **kwargs)
     except TelegramBadRequest as error:
         if _PARSE_ERROR_MARKER not in str(error):
             raise
         log.warning("telegram rejected html in outgoing message, sending plain text")
-        await message.answer(_TAG_RE.sub("", text), parse_mode=None, **kwargs)
+        return await message.answer(_TAG_RE.sub("", text), parse_mode=None, **kwargs)
 
 
 async def send_or_edit(

@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.agent.queue import UserSessionGate
 from jarvis.ai import AIProvider
-from jarvis.bot.handlers.render import send_outcome
+from jarvis.bot.formatting import esc
+from jarvis.bot.handlers.render import answer_safe, send_outcome
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 from jarvis.domain.enums import KnowledgeSource
@@ -115,10 +116,12 @@ async def _transcribe_and_handle(
         )
     except TranscriptionError as error:
         log.warning("transcription failed: %s", error)
-        await message.answer(f"🎤 Не получилось распознать: {error}. Пришлите текст.")
+        await answer_safe(
+            message, f"🎤 Не получилось распознать: {esc(str(error))}. Пришлите текст."
+        )
         return
 
-    await message.answer(f"🎤 <i>Распознано:</i>\n{transcript}")
+    await answer_safe(message, f"🎤 <i>Распознано:</i>\n{esc(transcript)}")
     from jarvis.logging_setup import get_correlation_id
     from jarvis.services.chatlog import ChatLogService
 
