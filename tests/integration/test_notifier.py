@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 import pytest
 
@@ -258,3 +258,108 @@ async def test_count_completed_between(session):
     assert await TaskRepository(session).count_completed_between(
         now + timedelta(hours=1), now + timedelta(hours=2)
     ) == 0
+
+
+def _local_midnight_due(settings, *, days: int) -> datetime:
+    """Дедлайн-«дата без времени»: локальная полночь через `days` дней."""
+    local_today = datetime.now(UTC).astimezone(settings.tz).date()
+    return datetime.combine(local_today + timedelta(days=days), time.min, settings.tz)
+
+
+async def test_date_only_due_skips_due_soon(
+    test_settings, session_factory, session
+):
+    """Дедлайн «дата без времени» не даёт пред-напоминания — только сводки."""
+    test_settings.notify_enabled = True
+    test_settings.notify_due_reminders = True
+    test_settings.notify_before_due_minutes = 24 * 60  # окно сутки: полночь внутри
+    test_settings.notify_digest_times = _digest_outside_window(test_settings)
+
+    service = TaskService(session)
+    await service.create_from_draft(
+        TaskDraft(title="Дата без времени", due_at=_local_midnight_due(test_settings, days=1))
+    )
+    await service.create_from_draft(
+        TaskDraft(title="Со временем", due_at=datetime.now(UTC) + timedelta(minutes=30))
+    )
+    await session.commit()
+
+    sent: list[str] = []
+
+    async def _send(chat_id: int, text: str) -> None:
+        sent.append(text)
+
+    stats = await run_notifier_once(session_factory, test_settings, _send)
+    assert stats["due_soon"] == 1
+    assert any("Со временем" in text for text in sent)
+    assert not any("Дата без времени" in text for text in sent)
+
+
+async def test_overdue_date_only_skips_due_reminder(
+    test_settings, session_factory, session
+):
+    """Просроченный дедлайн «дата без времени» тоже без индивидуального пинга."""
+    test_settings.notify_enabled = True
+    test_settings.notify_due_reminders = True
+    test_settings.notify_before_due_minutes = 0
+    test_settings.notify_digest_times = _digest_outside_window(test_settings)
+
+    service = TaskService(session)
+    await service.create_from_draft(
+        TaskDraft(title="Дата без времени", due_at=_local_midnight_due(test_settings, days=0))
+    )
+    await service.create_from_draft(
+        TaskDraft(title="Со временем", due_at=datetime.now(UTC) - timedelta(hours=1))
+    )
+    await session.commit()
+
+    sent: list[str] = []
+
+    async def _send(chat_id: int, text: str) -> None:
+        sent.append(text)
+
+    stats = await run_notifier_once(session_factory, test_settings, _send)
+    assert stats["due"] == 1
+    assert any("Со временем" in text for text in sent)
+    assert not any("Дата без времени" in text for text in sent)
+
+
+async def test_failed_send_keeps_marks_and_retries(
+    test_settings, session_factory, session
+):
+    """Сбой отправки: чужие отметки не теряются, упавшее повторяется."""
+    test_settings.notify_enabled = True
+    test_settings.notify_due_reminders = True
+    test_settings.notify_before_due_minutes = 0
+    test_settings.notify_digest_times = _digest_outside_window(test_settings)
+
+    service = TaskService(session)
+    for index in range(2):
+        await service.create_from_draft(
+            TaskDraft(
+                title=f"Просроченная {index}",
+                due_at=datetime.now(UTC) - timedelta(hours=index + 1),
+            )
+        )
+    await session.commit()
+
+    sent: list[str] = []
+    fail_once = {"armed": True}
+
+    async def _send(chat_id: int, text: str) -> None:
+        if fail_once["armed"]:
+            fail_once["armed"] = False
+            raise RuntimeError("telegram unavailable")
+        sent.append(text)
+
+    first = await run_notifier_once(session_factory, test_settings, _send)
+    assert first["due"] == 1  # второе напоминание ушло, отметка первого снята
+    assert len(sent) == 1
+
+    second = await run_notifier_once(session_factory, test_settings, _send)
+    assert second["due"] == 1  # повторяется только упавшее
+    assert len(sent) == 2
+
+    third = await run_notifier_once(session_factory, test_settings, _send)
+    assert third["due"] == 0
+    assert len(sent) == 2

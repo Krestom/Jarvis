@@ -17,6 +17,15 @@ def _active() -> tuple[ColumnElement[bool], ColumnElement[bool]]:
     return Task.deleted_at.is_(None), Task.status.not_in(DONE_STATUSES)
 
 
+def _not_date_only(tz_name: str) -> ColumnElement[bool]:
+    """Исключить дедлайны «ровно 00:00» по локальному времени (дата без времени)."""
+    local_due = func.timezone(tz_name, Task.due_at)
+    return or_(
+        func.date_part("hour", local_due) != 0,
+        func.date_part("minute", local_due) != 0,
+    )
+
+
 class TaskRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -162,9 +171,19 @@ class TaskRepository:
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def list_due_between(
-        self, start: datetime, end: datetime, *, limit: int = 20, offset: int = 0
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        tz: ZoneInfo | None = None,
     ) -> list[Task]:
-        """Задачи с дедлайном внутри интервала (для «задачи на <дата>»)."""
+        """Задачи с дедлайном внутри интервала (для «задачи на <дата>»).
+
+        tz — исключить дедлайны без времени (ровно 00:00 локально): нужно
+        напоминаниям, но не спискам дня (дайджестам).
+        """
         stmt = (
             select(Task)
             .where(*_active(), Task.due_at >= start, Task.due_at < end)
@@ -172,16 +191,26 @@ class TaskRepository:
             .limit(limit)
             .offset(offset)
         )
+        if tz is not None:
+            stmt = stmt.where(_not_date_only(tz.key))
         return list((await self._session.execute(stmt)).scalars().all())
 
-    async def list_due_before(self, moment: datetime, *, limit: int = 5) -> list[Task]:
-        """Незавершённые задачи с наступившим сроком (для напоминаний)."""
+    async def list_due_before(
+        self, moment: datetime, *, limit: int = 5, tz: ZoneInfo | None = None
+    ) -> list[Task]:
+        """Незавершённые задачи с наступившим сроком (для напоминаний).
+
+        tz — исключить дедлайны без времени (ровно 00:00 локально): по ним
+        отдельных напоминаний нет, только сводки.
+        """
         stmt = (
             select(Task)
             .where(*_active(), Task.due_at.is_not(None), Task.due_at <= moment)
             .order_by(Task.due_at.asc())
             .limit(limit)
         )
+        if tz is not None:
+            stmt = stmt.where(_not_date_only(tz.key))
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def count_completed_between(self, start: datetime, end: datetime) -> int:

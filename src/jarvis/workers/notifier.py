@@ -7,6 +7,12 @@
   напоминание, т.к. в ref входит время срока);
 - `digest:{дата}@{HH:MM}` — каждая сводка дня считается независимо.
 
+Задачи без времени (дедлайн ровно в 00:00 по локальному времени) отдельных
+напоминаний не получают — они видны в сводках (22:00 и утренних).
+
+Отметки коммитятся ДО отправки; если отправка упала, отметка снимается и
+повтор произойдёт в следующий проход.
+
 Проверка идёт с шагом `NOTIFY_POLL_SECONDS`; сводка срабатывает в окне
 30 минут после своего времени (переживает пропуск шага и рестарт в окне).
 За один проход отправляется не больше `REMINDERS_PER_PASS` напоминаний —
@@ -87,13 +93,20 @@ async def run_notifier_once(
     settings: Settings,
     send: SendMessage,
 ) -> dict[str, int]:
-    """Один проход планировщика. Возвращает счётчики отправленных уведомлений."""
+    """Один проход планировщика. Возвращает счётчики отправленных уведомлений.
+
+    Отметки о напоминаниях коммитятся до отправки (короткая транзакция),
+    сами отправки идут после коммита: сбой одной отправки не теряет отметки
+    об остальных, упавшая отправка повторяется в следующий проход. Повтор
+    возможен, если Telegram принял сообщение, а ответ потерялся.
+    """
     if not settings.notify_enabled or not settings.telegram_allowed_user_ids:
         return {}
     owner = settings.telegram_allowed_user_ids[0]
     now = datetime.now(UTC)
     local_now = now.astimezone(settings.tz)
-    stats = {"due": 0, "due_soon": 0, "digest": 0}
+    # (kind, ref, текст) — отправляется после коммита отметок.
+    to_send: list[tuple[str, str, str]] = []
     async with session_scope(session_factory) as session:
         repo = NotificationRepository(session)
         if settings.notify_due_reminders:
@@ -101,18 +114,19 @@ async def run_notifier_once(
             if settings.notify_before_due_minutes > 0:
                 soon_until = now + timedelta(minutes=settings.notify_before_due_minutes)
                 upcoming = await TaskRepository(session).list_due_between(
-                    now, soon_until, limit=REMINDER_SCAN_LIMIT
+                    now, soon_until, limit=REMINDER_SCAN_LIMIT, tz=settings.tz
                 )
                 for task in upcoming:
                     if sent >= REMINDERS_PER_PASS:
                         break
                     if not await repo.mark_if_new("task_due_soon", _task_ref(task)):
                         continue
-                    await send(owner, _due_soon_text(task, now, settings.tz))
-                    stats["due_soon"] += 1
+                    to_send.append(
+                        ("task_due_soon", _task_ref(task), _due_soon_text(task, now, settings.tz))
+                    )
                     sent += 1
             overdue = await TaskRepository(session).list_due_before(
-                now, limit=REMINDER_SCAN_LIMIT
+                now, limit=REMINDER_SCAN_LIMIT, tz=settings.tz
             )
             for task in overdue:
                 if sent >= REMINDERS_PER_PASS:
@@ -120,11 +134,13 @@ async def run_notifier_once(
                 if not await repo.mark_if_new("task_due", _task_ref(task)):
                     continue
                 due = task.due_at.astimezone(settings.tz).strftime("%d.%m %H:%M")
-                await send(
-                    owner,
-                    f"⏰ Пора заняться: «{task.title}» — срок {due}. Открыть: /tasks",
+                to_send.append(
+                    (
+                        "task_due",
+                        _task_ref(task),
+                        f"⏰ Пора заниматься: «{task.title}» — срок {due}. Открыть: /tasks",
+                    )
                 )
-                stats["due"] += 1
                 sent += 1
         for digest_at in parse_digest_times(settings.notify_digest_times):
             minutes_now = local_now.hour * 60 + local_now.minute
@@ -136,8 +152,28 @@ async def run_notifier_once(
             ref = f"{local_now.date().isoformat()}@{digest_at.strftime('%H:%M')}"
             if not await repo.mark_if_new("digest", ref):
                 continue
-            await send(owner, await _digest_text(session, settings, local_now, digest_at))
+            to_send.append(
+                ("digest", ref, await _digest_text(session, settings, local_now, digest_at))
+            )
+
+    stats = {"due": 0, "due_soon": 0, "digest": 0}
+    for kind, ref, text in to_send:
+        try:
+            await send(owner, text)
+        except Exception:  # noqa: BLE001 - отправка повторится в следующий проход
+            log.exception("notifier: failed to send %s %s", kind, ref)
+            try:
+                async with session_scope(session_factory) as session:
+                    await NotificationRepository(session).unmark(kind, ref)
+            except Exception:  # noqa: BLE001 - сбой снятия отметки не рвёт проход
+                log.exception("notifier: failed to unmark %s %s", kind, ref)
+            continue
+        if kind == "digest":
             stats["digest"] += 1
+        elif kind == "task_due_soon":
+            stats["due_soon"] += 1
+        else:
+            stats["due"] += 1
     return stats
 
 

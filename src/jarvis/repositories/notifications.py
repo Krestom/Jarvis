@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,3 +23,11 @@ class NotificationRepository:
         )
         result = await self._session.execute(statement)
         return result.scalar_one_or_none() is not None
+
+    async def unmark(self, kind: str, ref: str) -> None:
+        """Снять отметку: отправка не удалась, повторим в следующий проход."""
+        await self._session.execute(
+            delete(NotificationLog).where(
+                NotificationLog.kind == kind, NotificationLog.ref == ref
+            )
+        )
