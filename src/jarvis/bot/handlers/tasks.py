@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import TaskCB, TaskListCB, uuid_hex
-from jarvis.bot.formatting import esc, task_line
+from jarvis.bot.formatting import esc
 from jarvis.bot.handlers.open_entity import (
     parse_hex_uuid,
     render_comments_view,
@@ -27,6 +27,7 @@ from jarvis.bot.keyboards import (
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
+from jarvis.conversation.preview import TASK_VIEW_TITLES, task_list_text
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import PendingOpType, TaskBucket
 from jarvis.repositories.categories import CategoryRepository
@@ -35,18 +36,6 @@ from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.catalog import CatalogService
 from jarvis.services.tasks import TaskService
-
-VIEW_TITLES = {
-    "today": "🔸 Задачи на сегодня",
-    "week": "📆 На этой неделе",
-    "month": "📅 В этом месяце",
-    "long_term": "🗓 Долгосрочные",
-    "someday": "💭 Когда-нибудь",
-    "no_group": "📥 Без срока",
-    "inbox": "🌀 Inbox",
-    "all": "📋 Все задачи",
-    "done": "✅ Выполненные",
-}
 
 
 async def build_task_list(
@@ -81,14 +70,8 @@ async def build_task_list(
         tasks = await service.list_view(
             view, now=now, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
         )
-        title = VIEW_TITLES.get(view, "Задачи")
-    if not tasks:
-        text = f"{title}\n\nПусто."
-    else:
-        lines = [title, ""]
-        for index, task in enumerate(tasks, start=1):
-            lines.append(task_line(task, settings.tz, index=index, now=now))
-        text = "\n".join(lines)
+        title = TASK_VIEW_TITLES.get(view, "Задачи")
+    text = task_list_text(title, tasks, settings.tz, now)
     markup = task_list_keyboard(
         tasks, view, page, has_next=len(tasks) >= PAGE_SIZE, value=value
     )

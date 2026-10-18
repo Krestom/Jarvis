@@ -25,7 +25,12 @@ from jarvis.conversation.heuristics import (
     is_question,
     looks_like_search,
 )
-from jarvis.conversation.preview import fmt_dt_local, render_preview
+from jarvis.conversation.preview import (
+    TASK_VIEW_TITLES,
+    fmt_dt_local,
+    render_preview,
+    task_list_text,
+)
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import (
     KnowledgeSource,
@@ -67,18 +72,6 @@ def _ui_actions(interpretation: Interpretation) -> list[str]:
     if interpretation.ui_request is None:
         return []
     return list(interpretation.ui_request.actions)
-
-TASK_VIEW_LABELS = {
-    "today": "Задачи на сегодня",
-    "week": "Задачи на этой неделе",
-    "month": "Задачи в этом месяце",
-    "long_term": "Долгосрочные задачи",
-    "someday": "Когда-нибудь",
-    "no_group": "Без срока",
-    "inbox": "Inbox",
-    "all": "Все задачи",
-    "done": "Выполненные",
-}
 
 # «Задачи на 19 октября»: глаголы-просьбы, для которых дата — фильтр списка,
 # а не срок создания задачи.
@@ -570,8 +563,8 @@ class ConversationEngine:
             limit=TASK_LIST_LIMIT,
             offset=page * TASK_LIST_LIMIT,
         )
-        title = TASK_VIEW_LABELS.get(view, "Задачи")
-        return self._render_task_list(f"📋 <b>{title}</b>", tasks, view=view, page=page)
+        title = TASK_VIEW_TITLES.get(view, "Задачи")
+        return self._render_task_list(title, tasks, view=view, page=page)
 
     async def _show_tasks_on_date(self, day: date, page: int = 0) -> EngineOutcome:
         """Список задач с дедлайном на конкретный день («задачи на 19 октября»)."""
@@ -582,7 +575,7 @@ class ConversationEngine:
             offset=page * TASK_LIST_LIMIT,
         )
         return self._render_task_list(
-            f"📋 <b>Задачи на {day.strftime('%d.%m.%Y')}</b>",
+            f"📋 Задачи на {day.strftime('%d.%m.%Y')}",
             tasks,
             view="date",
             page=page,
@@ -600,7 +593,7 @@ class ConversationEngine:
             category.id, limit=TASK_LIST_LIMIT, offset=page * TASK_LIST_LIMIT
         )
         return self._render_task_list(
-            f"📋 <b>Задачи в «{html_escape(category.name)}»</b>",
+            f"🗂 {html_escape(category.name)}",
             tasks,
             view="category",
             page=page,
@@ -657,16 +650,11 @@ class ConversationEngine:
         page: int = 0,
         value: str = "",
     ) -> EngineOutcome:
+        text = task_list_text(title, tasks, self._settings.tz, datetime.now(UTC))
         if not tasks:
-            return EngineOutcome(f"{title}\n\nПусто.", menu=self._menu_flag())
-        lines = [title, ""]
-        for index, task in enumerate(tasks, start=1):
-            suffix = ""
-            if task.due_at is not None:
-                suffix = f" — до {fmt_dt_local(task.due_at, self._settings.tz)}"
-            lines.append(f"{index}. {html_escape(task.title)}{suffix}")
+            return EngineOutcome(text, menu=self._menu_flag())
         return EngineOutcome(
-            "\n".join(lines),
+            text,
             task_choices=list(tasks),
             task_choices_action="view",
             task_choices_prompt="Нажмите на задачу, чтобы открыть карточку:",

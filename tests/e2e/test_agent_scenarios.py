@@ -371,7 +371,7 @@ async def test_agent_opens_tasks_screen(test_settings, session_factory, session)
 
     messages = await harness.send_text(DEFAULT_USER_ID, "покажи задачи на неделю")
     combined = " ".join(m.text or "" for m in messages)
-    assert "Задачи на этой неделе" in combined
+    assert "📆 На этой неделе" in combined  # единый вид списков (как в меню)
     assert "Починить сервер" in combined
     assert keyboard_messages(messages)  # кликабельные карточки
 

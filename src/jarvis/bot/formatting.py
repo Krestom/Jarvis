@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from jarvis.conversation.preview import (
@@ -15,7 +14,7 @@ from jarvis.conversation.preview import (
     STATUS_LABELS,
     fmt_dt_local,
 )
-from jarvis.domain.enums import Sensitivity, TaskBucket, TaskPriority, TaskStatus
+from jarvis.domain.enums import Sensitivity, TaskBucket, TaskPriority
 
 MESSAGE_LIMIT = 4000
 
@@ -41,38 +40,6 @@ def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
     if remaining:
         parts.append(remaining)
     return parts
-
-
-def task_icon(status: TaskStatus, overdue: bool) -> str:
-    if status == TaskStatus.DONE:
-        return "✅"
-    if status == TaskStatus.CANCELLED:
-        return "🚫"
-    if overdue:
-        return "⚠️"
-    if status == TaskStatus.IN_PROGRESS:
-        return "🔵"
-    if status == TaskStatus.WAITING:
-        return "⏳"
-    return "▪️"
-
-
-def task_line(task, tz: ZoneInfo, *, index: int | None = None, now: datetime | None = None) -> str:
-    overdue = False
-    if now is not None and task.due_at is not None:
-        overdue = task.due_at.astimezone(tz).date() < now.astimezone(tz).date()
-    prefix = f"{index}. " if index is not None else ""
-    line = f"{prefix}{task_icon(task.status, overdue)} {esc(task.title)}"
-    details: list[str] = []
-    if task.due_at is not None:
-        details.append("до " + fmt_dt_local(task.due_at, tz))
-    if task.bucket is not None:
-        details.append(BUCKET_LABELS.get(TaskBucket(task.bucket), str(task.bucket)))
-    if task.priority in (TaskPriority.HIGH, TaskPriority.URGENT):
-        details.append(PRIORITY_LABELS.get(TaskPriority(task.priority), str(task.priority)))
-    if details:
-        line += f" <i>({' · '.join(esc(part) for part in details)})</i>"
-    return line
 
 
 def task_card_text(task, tz: ZoneInfo, category_name: str | None = None) -> str:
