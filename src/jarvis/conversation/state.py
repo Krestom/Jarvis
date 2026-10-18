@@ -48,17 +48,5 @@ class ConversationStore:
             pending_operation_id=op_id,
         )
 
-    async def touch(self, telegram_user_id: int, **fields: Any) -> ConversationState | None:
-        state = await self.get_active(telegram_user_id)
-        if state is None:
-            return None
-        return await self.set(
-            telegram_user_id,
-            state.flow,
-            step=fields.get("step", state.step),
-            data=fields.get("data", state.data),
-            pending_operation_id=fields.get("pending_operation_id", state.pending_operation_id),
-        )
-
     async def clear(self, telegram_user_id: int) -> None:
         await self._repo.clear(telegram_user_id)

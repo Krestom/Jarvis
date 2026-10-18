@@ -118,9 +118,6 @@ class TaskService:
             return await self._repo.list_done(limit=limit, offset=offset)
         raise OperationError(f"Неизвестный список задач: {view}")
 
-    async def count_active(self) -> int:
-        return await self._repo.count_active()
-
     async def list_on_date(
         self, day: date, *, tz: ZoneInfo, limit: int = 20, offset: int = 0
     ) -> list:

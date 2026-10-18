@@ -117,14 +117,6 @@ class SecretCreateDraft(BaseModel):
     category_id: uuid.UUID | None = None
 
 
-class SecretUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    purpose: str | None = None
-    secret_type: SecretType | None = None
-    encrypted_value_b64: str | None = None
-    key_version: int | None = None
-
-
 class CategoryDraft(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 

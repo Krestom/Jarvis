@@ -121,9 +121,6 @@ async def knowledge_action(
     await callback.answer("Неизвестное действие", show_alert=True)
 
 
-_ = uuid_hex
-
-
 def build_router() -> Router:
     router = Router(name="knowledge")
     router.callback_query.register(knowledge_page, KbListCB.filter())

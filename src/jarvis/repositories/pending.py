@@ -47,17 +47,6 @@ class PendingOperationRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_pending(self, telegram_user_id: int) -> list[PendingOperation]:
-        stmt = (
-            select(PendingOperation)
-            .where(
-                PendingOperation.telegram_user_id == telegram_user_id,
-                PendingOperation.status == PendingStatus.PENDING,
-            )
-            .order_by(PendingOperation.created_at)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
-
     async def resolve(
         self,
         operation_id: uuid.UUID,
@@ -102,13 +91,6 @@ class PendingOperationRepository:
             expired = (await self._session.execute(stmt_expire)).scalar_one_or_none()
             return ResolutionOutcome(resolved=expired or resolved, reason="expired")
         return ResolutionOutcome(resolved=resolved, reason="ok")
-
-    async def list_expired(self, now: datetime) -> list[PendingOperation]:
-        stmt = select(PendingOperation).where(
-            PendingOperation.status == PendingStatus.PENDING,
-            PendingOperation.expires_at < now,
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
 
     async def expire_stale(self, now: datetime) -> int:
         result = await self._session.execute(

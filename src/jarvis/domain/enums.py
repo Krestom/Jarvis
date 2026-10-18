@@ -146,5 +146,4 @@ class PendingOpType(StrEnum):
     UPDATE_DOCUMENT = "update_document"
     DELETE_DOCUMENT = "delete_document"
     CREATE_SECRET = "create_secret"
-    UPDATE_SECRET = "update_secret"
     DELETE_SECRET = "delete_secret"

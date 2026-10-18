@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,13 +66,6 @@ class KnowledgeService:
 
     async def get(self, item_id: uuid.UUID):
         return await self._repo.get(item_id)
-
-    async def count_active(self) -> int:
-        return await self._repo.count_active()
-
-    @staticmethod
-    def now() -> datetime:
-        return datetime.now(UTC)
 
 
 SENSITIVITY_ORDER = {

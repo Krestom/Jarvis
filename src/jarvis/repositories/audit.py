@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.db.models import AuditLog
@@ -35,7 +34,3 @@ class AuditRepository:
             )
         )
         await self._session.flush()
-
-    async def list_recent(self, *, limit: int = 20) -> list[AuditLog]:
-        stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
-        return list((await self._session.execute(stmt)).scalars().all())

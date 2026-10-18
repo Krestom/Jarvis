@@ -28,7 +28,6 @@ _NAV_AFTER: dict[PendingOpType, tuple[str, str]] = {
     PendingOpType.RENAME_CATEGORY: ("⚙️ Настройки", "settings"),
     PendingOpType.CREATE_PROJECT: ("🗂 Проекты", "projects"),
     PendingOpType.CREATE_SECRET: ("🔐 Секреты", "secrets"),
-    PendingOpType.UPDATE_SECRET: ("🔐 Секреты", "secrets"),
     PendingOpType.DELETE_SECRET: ("🔐 Секреты", "secrets"),
 }
 

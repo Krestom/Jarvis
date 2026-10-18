@@ -48,14 +48,6 @@ class KnowledgeRepository:
         )
         return list(result.scalars().all())
 
-    async def count_active(self) -> int:
-        result = await self._session.execute(
-            select(func.count()).select_from(KnowledgeItem).where(
-                KnowledgeItem.deleted_at.is_(None)
-            )
-        )
-        return int(result.scalar_one())
-
     async def list_for_project(
         self,
         project_id: uuid.UUID,

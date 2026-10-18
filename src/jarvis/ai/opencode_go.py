@@ -181,15 +181,6 @@ class OpenCodeGoClient:
         return data["choices"][0]["message"]["content"]
 
 
-def _usage_tokens(usage: dict[str, Any] | None) -> int | None:
-    """Совместимость: см. jarvis.agent.budget.usage_tokens."""
-
-    if not usage:
-        return None
-    total = usage.get("total_tokens")
-    return int(total) if isinstance(total, int) else None
-
-
 class OpenCodeGoProvider:
     """AIProvider поверх OpenCode Go (chat/completions или Responses API)."""
 

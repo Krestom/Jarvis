@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import CallbackQuery, Message, TelegramObject, Update
+from aiogram.types import TelegramObject, Update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis.db.session import session_scope
@@ -114,6 +114,3 @@ def register_middlewares(dispatcher, session_factory, authorizer) -> None:
     from jarvis.bot.chatlog import ChatLogMiddleware
 
     dispatcher.message.middleware(ChatLogMiddleware())
-
-
-message_types = (Message, CallbackQuery)

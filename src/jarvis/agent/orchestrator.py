@@ -459,10 +459,6 @@ _REASON_LABELS = {
 }
 
 
-def _usage_tokens(usage: dict | None) -> int | None:  # noqa: D103 - совместимость старых импортов
-    return usage_tokens(usage)
-
-
 def _finding(tool_name: str, result: ToolResult) -> str:
     data = result.data or {}
     if tool_name == "list_tasks":
