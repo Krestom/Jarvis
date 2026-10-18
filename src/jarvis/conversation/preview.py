@@ -91,7 +91,6 @@ OPERATION_TITLES = {
     PendingOpType.UPDATE_DOCUMENT: "Обновить документ?",
     PendingOpType.DELETE_DOCUMENT: "Удалить документ?",
     PendingOpType.CREATE_SECRET: "Сохранить секрет?",
-    PendingOpType.UPDATE_SECRET: "Изменить секрет?",
     PendingOpType.DELETE_SECRET: "Удалить секрет?",
 }
 
@@ -102,6 +101,66 @@ def fmt_dt_local(dt: datetime, tz: ZoneInfo) -> str:
     if local.hour or local.minute:
         return f"{date_part}, {local.hour:02d}:{local.minute:02d}"
     return date_part
+
+
+# Единый вид списков задач: заголовки и строки общие для меню/команд,
+# естественного языка и экранов агента.
+TASK_VIEW_TITLES = {
+    "today": "🔸 Задачи на сегодня",
+    "week": "📆 На этой неделе",
+    "month": "📅 В этом месяце",
+    "long_term": "🗓 Долгосрочные",
+    "someday": "💭 Когда-нибудь",
+    "no_group": "📥 Без срока",
+    "inbox": "🌀 Inbox",
+    "all": "📋 Все задачи",
+    "done": "✅ Выполненные",
+}
+
+
+def task_icon(status: TaskStatus, overdue: bool) -> str:
+    if status == TaskStatus.DONE:
+        return "✅"
+    if status == TaskStatus.CANCELLED:
+        return "🚫"
+    if overdue:
+        return "⚠️"
+    if status == TaskStatus.IN_PROGRESS:
+        return "🔵"
+    if status == TaskStatus.WAITING:
+        return "⏳"
+    return "▪️"
+
+
+def task_line(
+    task, tz: ZoneInfo, *, index: int | None = None, now: datetime | None = None
+) -> str:
+    """Строка списка: статус-иконка, срок, группа, приоритет."""
+    overdue = False
+    if now is not None and task.due_at is not None:
+        overdue = task.due_at.astimezone(tz).date() < now.astimezone(tz).date()
+    prefix = f"{index}. " if index is not None else ""
+    line = f"{prefix}{task_icon(task.status, overdue)} {html.escape(str(task.title))}"
+    details: list[str] = []
+    if task.due_at is not None:
+        details.append("до " + fmt_dt_local(task.due_at, tz))
+    if task.bucket is not None:
+        details.append(BUCKET_LABELS.get(TaskBucket(task.bucket), str(task.bucket)))
+    if task.priority in (TaskPriority.HIGH, TaskPriority.URGENT):
+        details.append(PRIORITY_LABELS.get(TaskPriority(task.priority), str(task.priority)))
+    if details:
+        line += f" <i>({' · '.join(html.escape(part) for part in details)})</i>"
+    return line
+
+
+def task_list_text(title: str, tasks, tz: ZoneInfo, now: datetime) -> str:
+    """Текст списка задач (пустой список — «Пусто.»)."""
+    if not tasks:
+        return f"{title}\n\nПусто."
+    lines = [title, ""]
+    for index, task in enumerate(tasks, start=1):
+        lines.append(task_line(task, tz, index=index, now=now))
+    return "\n".join(lines)
 
 
 def _line(label: str, value: str | None) -> str:
@@ -411,5 +470,8 @@ async def _render_delete_target(
 
         secret = await SecretRepository(session).get(uuid.UUID(str(entity_id)))
         if secret is not None:
-            return _line("Секрет", secret.name)
+            return (
+                _line("Секрет", secret.name)
+                + "<i>Строка секрета будет удалена из базы без возможности восстановления.</i>"
+            )
     return "<i>Объект не найден.</i>"

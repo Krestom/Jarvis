@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +18,6 @@ from jarvis.services.drafts import (
     KnowledgeUpdate,
     ProjectDraft,
     SecretCreateDraft,
-    SecretUpdate,
     TaskDraft,
     TaskUpdate,
 )
@@ -209,29 +207,14 @@ async def apply_operation(
         secret_id = await SecretService(session, settings).create_from_draft(draft)
         return AppliedOperation(EntityType.SECRET, secret_id, f"Секрет сохранён: {draft.name}")
 
-    if operation_type == PendingOpType.UPDATE_SECRET:
-        from jarvis.services.secrets import SecretService
-
-        secret_id = uuid.UUID(payload["secret_id"])
-        changes = SecretUpdate.model_validate(payload.get("changes", {})).model_dump(
-            exclude_unset=True
-        )
-        await SecretService(session, settings).apply_update(secret_id, changes)
-        return AppliedOperation(EntityType.SECRET, secret_id, "Секрет обновлён")
-
     if operation_type == PendingOpType.DELETE_SECRET:
         from jarvis.services.secrets import SecretService
 
         ref = EntityRef.model_validate(payload)
-        await SecretService(session, settings).soft_delete(ref.entity_id)
+        await SecretService(session, settings).delete(ref.entity_id)
         return AppliedOperation(EntityType.SECRET, ref.entity_id, "Секрет удалён")
 
     raise OperationError(f"Неподдерживаемый тип операции: {operation_type}")
 
 
-def utcnow() -> datetime:
-    return datetime.now(UTC)
-
-
-# Реэкспорт для удобства вызовов из engine/handlers.
-__all__ = ["AppliedOperation", "apply_operation", "utcnow"]
+__all__ = ["AppliedOperation", "apply_operation"]

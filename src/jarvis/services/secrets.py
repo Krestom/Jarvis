@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jarvis.config.settings import Settings
 from jarvis.repositories.secrets import SecretRepository
 from jarvis.security.crypto import KeyRing, decrypt, encrypt
-from jarvis.services.drafts import SecretCreateDraft, SecretUpdate
+from jarvis.services.drafts import SecretCreateDraft
 from jarvis.services.errors import NotFoundError, OperationError
 
 
@@ -50,17 +50,6 @@ class SecretService:
         )
         return secret.id
 
-    async def apply_update(self, secret_id: uuid.UUID, changes: dict) -> uuid.UUID:
-        secret = await self._repo.get(secret_id)
-        if secret is None:
-            raise NotFoundError("Секрет не найден")
-        update = SecretUpdate.model_validate(changes)
-        fields = update.model_dump(exclude_unset=True)
-        if "encrypted_value_b64" in fields:
-            fields["encrypted_value"] = base64.b64decode(fields.pop("encrypted_value_b64"))
-        await self._repo.update(secret, **fields)
-        return secret.id
-
     async def list_metadata(self, *, limit: int = 10, offset: int = 0):
         return await self._repo.list_active(limit=limit, offset=offset)
 
@@ -74,9 +63,10 @@ class SecretService:
             raise NotFoundError("Секрет не найден")
         return self.decrypt_value(secret.encrypted_value)
 
-    async def soft_delete(self, secret_id: uuid.UUID) -> uuid.UUID:
+    async def delete(self, secret_id: uuid.UUID) -> uuid.UUID:
+        """Удаление необратимо: строка с шифротекстом значения стирается из БД."""
         secret = await self._repo.get(secret_id)
         if secret is None:
             raise NotFoundError("Секрет не найден")
-        await self._repo.soft_delete(secret)
+        await self._repo.hard_delete(secret)
         return secret.id

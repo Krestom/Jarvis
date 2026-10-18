@@ -7,8 +7,9 @@ import base64
 import pytest
 
 from jarvis.config.settings import Settings
+from jarvis.db.models import Secret
 from jarvis.repositories.secrets import SecretRepository
-from jarvis.services.drafts import SecretCreateDraft, SecretUpdate
+from jarvis.services.drafts import SecretCreateDraft
 from jarvis.services.errors import OperationError
 from jarvis.services.secrets import SecretService
 
@@ -61,24 +62,26 @@ async def test_secret_encrypted_at_rest(session, test_settings):
     assert b"plain-text-value" not in stored.encrypted_value
 
 
-async def test_secret_update_and_reveal(session, test_settings):
+async def test_secret_delete_removes_row(session, test_settings):
+    """Удаление секрета необратимо: строка стирается из БД (не soft delete)."""
     service = SecretService(session, test_settings)
-    encrypted_b64, key_version = service.encrypt_value("old-value")
+    encrypted_b64, key_version = service.encrypt_value("to-delete")
     secret_id = await service.create_from_draft(
         SecretCreateDraft(
-            name="Ключ",
-            secret_type="ssh_key",
+            name="Удаляемый",
+            secret_type="other",
             encrypted_value_b64=encrypted_b64,
             key_version=key_version,
         )
     )
 
-    new_b64, new_version = service.encrypt_value("new-value")
-    update = SecretUpdate(encrypted_value_b64=new_b64, key_version=new_version)
-    changes = update.model_dump(exclude_unset=True)
-    await service.apply_update(secret_id, changes)
+    await service.delete(secret_id)
 
-    assert await service.reveal(secret_id) == "new-value"
+    assert await session.get(Secret, secret_id) is None  # строки нет даже без фильтра
+    assert await service.list_metadata() == []
+
+    with pytest.raises(OperationError, match="не найден"):
+        await service.delete(secret_id)
 
 
 async def test_secret_with_wrong_key_cannot_be_revealed(session, tmp_path):

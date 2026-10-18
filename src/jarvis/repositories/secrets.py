@@ -41,8 +41,9 @@ class SecretRepository:
         await self._session.flush()
         return secret
 
-    async def soft_delete(self, secret: Secret) -> None:
-        secret.deleted_at = func.now()
+    async def hard_delete(self, secret: Secret) -> None:
+        """Удалить строку секрета: значение не должно оставаться в БД."""
+        await self._session.delete(secret)
         await self._session.flush()
 
     async def list_active(
@@ -56,13 +57,4 @@ class SecretRepository:
         if secret_type is not None:
             stmt = stmt.where(Secret.secret_type == secret_type)
         stmt = stmt.order_by(Secret.name).limit(limit).offset(offset)
-        return list((await self._session.execute(stmt)).scalars().all())
-
-    async def search_by_name(self, query: str, *, limit: int = 10) -> list[Secret]:
-        stmt = (
-            select(Secret)
-            .where(Secret.deleted_at.is_(None), Secret.name.ilike(f"%{query}%"))
-            .order_by(Secret.name)
-            .limit(limit)
-        )
         return list((await self._session.execute(stmt)).scalars().all())
