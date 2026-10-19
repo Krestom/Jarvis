@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import itertools
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
@@ -23,6 +23,8 @@ from aiogram.types import (
     User,
     Voice,
 )
+
+from jarvis.bot.ui_state import MessageTracker
 
 BOT_USER = User(id=42, is_bot=True, first_name="Jarvis", username="jarvis_test_bot")
 DEFAULT_USER_ID = 111
@@ -41,6 +43,7 @@ class FakeTelegramSession(BaseSession):
         self.sent_messages: list[Message] = []
         self.download_payload: bytes = b"fake-binary-payload"
         self.recorder = None  # колбэк журнала чата (см. bot/chatlog.py)
+        self.tracker = MessageTracker()
         self._message_id = 1000
 
     async def close(self) -> None:
@@ -64,6 +67,7 @@ class FakeTelegramSession(BaseSession):
                 reply_markup=method.reply_markup,
             )
             self.sent_messages.append(message)
+            self.tracker.note(int(method.chat_id), message.message_id)
             if self.recorder is not None and method.text:
                 await self.recorder(int(method.chat_id), method.text)
             return message
@@ -82,6 +86,7 @@ class FakeTelegramSession(BaseSession):
                 ),
             )
             self.sent_messages.append(message)
+            self.tracker.note(int(method.chat_id), message.message_id)
             return message
         if name in ("EditMessageText", "EditMessageReplyMarkup"):
             # Правим сохранённое сообщение, чтобы кнопки после edit_text
@@ -193,13 +198,9 @@ class BotHarness:
         user_id: int,
         message: Message,
         label: str,
-        *,
-        sent_ago: timedelta | None = None,
     ) -> list[Message]:
         # Сообщение могло быть отредактировано ботом — берём актуальную версию.
         current = self.current(message)
-        if sent_ago is not None:
-            current = current.model_copy(update={"date": datetime.now(UTC) - sent_ago})
         button_data = _find_button(current.reply_markup, label)
         assert button_data is not None, f"button {label!r} not found"
         callback = CallbackQuery(

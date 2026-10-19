@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import CallbackQuery, TelegramObject, Update
+from aiogram.types import CallbackQuery, Message, TelegramObject, Update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis.bot.ui_state import stale_message
@@ -21,8 +20,6 @@ from jarvis.repositories.processed_updates import ProcessedUpdateRepository
 from jarvis.security.auth import Authorizer
 
 log = logging.getLogger(__name__)
-
-STALE_MESSAGE_AFTER = timedelta(minutes=10)
 
 
 class CorrelationMiddleware(BaseMiddleware):
@@ -110,11 +107,12 @@ class DBSessionMiddleware(BaseMiddleware):
             return await handler(event, data)
 
 
-class StaleMessageMiddleware(BaseMiddleware):
-    """Клик по старому сообщению: новый ответ внизу и сброс сценария.
+class MessageFreshnessMiddleware(BaseMiddleware):
+    """Кнопка не последнего сообщения: новый ответ внизу и сброс сценария.
 
-    Живёт внутри DBSessionMiddleware (нужен data["session"]). Поиск не сбрасываем:
-    по нему листают старые результаты.
+    Живёт внутри DBSessionMiddleware (нужен data["session"]). Для обычных
+    сообщений трекер запоминает message_id. Поиск не сбрасываем: по нему
+    листают старые результаты.
     """
 
     async def __call__(
@@ -123,16 +121,22 @@ class StaleMessageMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
+        bot = data.get("bot")
+        tracker = getattr(getattr(bot, "session", None), "tracker", None)
+        if isinstance(event, Message):
+            if tracker is not None:
+                tracker.note(event.chat.id, event.message_id)
+            return await handler(event, data)
+        if not isinstance(event, CallbackQuery) or event.message is None:
+            return await handler(event, data)
         if (
-            not isinstance(event, CallbackQuery)
-            or event.message is None
-            or event.from_user is None
-            or datetime.now(UTC) - event.message.date <= STALE_MESSAGE_AFTER
+            tracker is not None
+            and not tracker.is_stale(event.message.chat.id, event.message.message_id)
         ):
             return await handler(event, data)
         session = data.get("session")
         settings = data.get("settings")
-        if session is not None and settings is not None:
+        if session is not None and settings is not None and event.from_user is not None:
             store = ConversationStore(ConversationRepository(session), settings)
             state = await store.get_active(event.from_user.id)
             if state is not None and state.flow != Flow.SEARCH_WAIT:
@@ -152,7 +156,8 @@ def register_middlewares(dispatcher, session_factory, authorizer) -> None:
     dispatcher.callback_query.outer_middleware(AccessMiddleware(authorizer))
     dispatcher.message.middleware(DBSessionMiddleware(session_factory))
     dispatcher.callback_query.middleware(DBSessionMiddleware(session_factory))
-    dispatcher.callback_query.middleware(StaleMessageMiddleware())
+    dispatcher.message.middleware(MessageFreshnessMiddleware())
+    dispatcher.callback_query.middleware(MessageFreshnessMiddleware())
     from jarvis.bot.chatlog import ChatLogMiddleware
 
     dispatcher.message.middleware(ChatLogMiddleware())

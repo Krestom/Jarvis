@@ -11,6 +11,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.types import Message, TelegramObject
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jarvis.bot.ui_state import MessageTracker
 from jarvis.config.settings import Settings
 from jarvis.db.session import session_scope
 from jarvis.logging_setup import get_correlation_id
@@ -46,8 +47,14 @@ class RecordingAiohttpSession(AiohttpSession):
 
     recorder: Callable[[int, str], Awaitable[None]] | None = None
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.tracker = MessageTracker()
+
     async def make_request(self, bot, method, timeout: int | None = None):
         result = await super().make_request(bot, method, timeout)
+        if isinstance(result, Message):
+            self.tracker.note(result.chat.id, result.message_id)
         if (
             self.recorder is not None
             and type(method).__name__ == "SendMessage"

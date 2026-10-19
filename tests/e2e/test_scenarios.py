@@ -201,7 +201,6 @@ async def test_stale_button_sends_new_message_and_resets_flow(
         DEFAULT_USER_ID,
         menu_message,
         "Сегодня",
-        sent_ago=timedelta(minutes=15),
     )
     # Сценарий сброшен, а результат ушёл новым сообщением вниз (не правкой старого).
     assert await ConversationRepository(session).get(DEFAULT_USER_ID) is None
