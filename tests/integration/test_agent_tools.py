@@ -244,6 +244,85 @@ async def test_update_task_can_clear_due_date(session, test_settings):
     assert (await TaskRepository(session).get(task_id)).due_at is None
 
 
+async def test_update_task_moves_to_project_and_clears(session, test_settings):
+    from jarvis.conversation.preview import render_preview
+    from jarvis.services.confirmation import ConfirmationService
+
+    project = await ProjectRepository(session).create(name="OpenCode")
+    task_id = await TaskService(session).create_from_draft(TaskDraft(title="Почитать про трейсинг"))
+    registry = make_registry(session, test_settings)
+    confirmation = ConfirmationService(session, test_settings)
+
+    result = await registry.call(
+        "update_task", {"task_id": str(task_id), "project": "OpenCode"}
+    )
+    assert result.ok is True
+    assert result.data["changes"] == ["project_id"]
+    assert (await confirmation.confirm(USER, registry.pending_operation_ids[-1])).ok
+    assert (await TaskRepository(session).get(task_id)).project_id == project.id
+
+    # Неизвестный проект создаётся при подтверждении, превью это показывает.
+    preview = await render_preview(
+        session,
+        PendingOpType.UPDATE_TASK,
+        {"task_id": str(task_id), "changes": {"project_name": "Новый проект"}},
+        test_settings.tz,
+    )
+    assert "проект" in preview and "будет создан" in preview
+    result = await registry.call(
+        "update_task", {"task_id": str(task_id), "project": "Новый проект"}
+    )
+    assert result.ok is True
+    assert (await confirmation.confirm(USER, registry.pending_operation_ids[-1])).ok
+    created = await ProjectRepository(session).find_by_name("Новый проект")
+    assert created is not None
+    assert (await TaskRepository(session).get(task_id)).project_id == created.id
+
+    result = await registry.call(
+        "update_task", {"task_id": str(task_id), "project": "без проекта"}
+    )
+    assert result.ok is True
+    assert (await confirmation.confirm(USER, registry.pending_operation_ids[-1])).ok
+    assert (await TaskRepository(session).get(task_id)).project_id is None
+
+
+async def test_daily_stats_counts_and_lists(session, test_settings):
+    from datetime import datetime
+
+    from jarvis.services.confirmation import ConfirmationService
+    from jarvis.services.improvements import ImprovementService
+
+    registry = make_registry(session, test_settings)
+    confirmation = ConfirmationService(session, test_settings)
+
+    created = await registry.call("create_task", {"title": "Сделано за день"})
+    assert created.ok is True
+    outcome = await confirmation.confirm(USER, registry.pending_operation_ids[-1])
+    assert outcome.ok is True
+    task_id = outcome.entity_id
+
+    updated = await registry.call(
+        "update_task", {"task_id": task_id, "status": "done"}
+    )
+    assert updated.ok is True
+    assert (await confirmation.confirm(USER, registry.pending_operation_ids[-1])).ok
+    await ImprovementService(session, test_settings).record_gap(
+        title="Новый пробел", summary="Чего-то не хватает"
+    )
+
+    stats = await registry.call("daily_stats", {})
+    assert stats.ok is True
+    assert stats.data["date"] == datetime.now(test_settings.tz).date().isoformat()
+    assert stats.data["actions"]["confirm:create_task"] == 1
+    assert stats.data["actions"]["confirm:update_task"] == 1
+    assert stats.data["tasks_completed"]["count"] == 1
+    assert stats.data["tasks_completed"]["items"] == ["Сделано за день"]
+    assert stats.data["new_improvements"]["count"] == 1
+    assert stats.data["new_improvements"]["items"] == [
+        {"title": "Новый пробел", "category": "missing_capability"}
+    ]
+
+
 async def test_update_knowledge_tool_edits_even_sensitive_notes(session, test_settings):
     from jarvis.domain.enums import KnowledgeSource, KnowledgeType, Sensitivity
     from jarvis.services.confirmation import ConfirmationService

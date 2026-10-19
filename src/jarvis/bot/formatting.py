@@ -42,7 +42,9 @@ def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
     return parts
 
 
-def task_card_text(task, tz: ZoneInfo, category_name: str | None = None) -> str:
+def task_card_text(
+    task, tz: ZoneInfo, category_name: str | None = None, project_name: str | None = None
+) -> str:
     lines = [f"<b>Задача:</b> {esc(task.title)}"]
     if task.description:
         lines.append(f"\n{esc(task.description)}")
@@ -57,6 +59,8 @@ def task_card_text(task, tz: ZoneInfo, category_name: str | None = None) -> str:
         lines.append(f"<b>Приоритет:</b> {esc(label)}")
     if category_name:
         lines.append(f"<b>Категория:</b> {esc(category_name)}")
+    if project_name:
+        lines.append(f"<b>Проект:</b> {esc(project_name)}")
     if task.original_text and task.original_text.strip() != task.title.strip():
         original = task.original_text.strip()
         if len(original) > 200:

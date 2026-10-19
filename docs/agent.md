@@ -71,7 +71,7 @@ bot/handlers/free_text.py ──► conversation/engine.py  (роутинг)
 | `create_task` | mutation | low | превью + кнопка: задача создаётся после подтверждения |
 | `create_category` | mutation | low | превью + кнопка; идемпотентно (уже есть / уже предложена) |
 | `rename_category` | mutation | low | превью + кнопка: переименование категории-папки |
-| `update_task` | mutation | low | превью + кнопка: статус/приоритет/группа/срок/заголовок; `due_at=null` — убрать срок |
+| `update_task` | mutation | low | превью + кнопка: статус/приоритет/группа/срок/заголовок/проект (проект создаётся, если его нет; `project=«нет»` — убрать); `due_at=null` — убрать срок |
 | `add_comment` | mutation | low | превью + кнопка: комментарий к задаче |
 | `update_comment` | mutation | low | превью + кнопка: правка текста комментария (id из get_task) |
 | `delete_task` | mutation | **high** | только отправляет pending-подтверждение |
@@ -83,6 +83,7 @@ bot/handlers/free_text.py ──► conversation/engine.py  (роутинг)
 | `web_search` | read | low | внешний поиск (Tavily; источники указываются в ответе) |
 | `report_capability_gap` | mutation | low | запись пробела в improvement backlog |
 | `list_improvements` | read | low | чтение backlog (для «покажи бэклог») |
+| `daily_stats` | read | low | дневная статистика: действия по типам, закрытые задачи, новые записи backlog (date — по умолчанию сегодня) |
 | `update_improvement` | mutation | medium | смена статуса записи backlog (как в /diagnostics; применяется сразу, без кнопки) |
 | `export_chat` | read | low | журнал диалога за день (MD + JSON) файлами в чат |
 | `export_issues` | read | low | improvement backlog (диагностика) файлами MD + JSON в чат |
@@ -109,7 +110,7 @@ someday/no_group/inbox/all/done, либо on_date, либо category), `search`
 |---|---|---|
 | Главное меню | 🔎 Поиск, ✅ Задачи, 📚 Знания, 📄 Документы, 🗂 Проекты, ⚙️ Настройки | экраны `search`/`tasks`/`knowledge`/`documents`, `list_projects`+`create_project`, `create_category`+`rename_category` |
 | Меню «Задачи» | Сегодня, На этой неделе, В этом месяце, Долгосрочные, Без срока, Выполненные, По категориям | экран `tasks` (`view`, `category`); `on_date` — для «задачи на 19 октября» |
-| Карточка задачи | изменить срок, группа, завершить/вернуть, комментарии (список/добавить/править), удалить, к спискам | `update_task` (срок/группа/статус), экран `card`, `list_comments`+`add_comment`+`update_comment`, `delete_task` |
+| Карточка задачи | изменить срок, группа, завершить/вернуть, комментарии (список/добавить/править), удалить, к спискам | `update_task` (срок/группа/статус/проект), экран `card`, `list_comments`+`add_comment`+`update_comment`, `delete_task` |
 | Знания | список, карточка, полный текст, похожие, удалить | экран `knowledge`, экран `card`, `get_knowledge`, `search_all`, `delete_knowledge` |
 | Документы | список, по категориям, карточка, получить файл, категория, удалить | экраны `documents`/`card`, `send_document`, `update_document`, `delete_document` |
 | Проекты | список, новый проект | `list_projects`, `create_project` (редактирования проектов нет и в UI) |
@@ -185,8 +186,9 @@ none — агент выключен, система работает как р�
 Общие: `AGENT_MAX_LLM_CALLS` (18), `AGENT_MAX_REPEAT_TOOL_CALLS` (2 — одинаковый
 вызов с теми же аргументами), серия из 4 ошибок подряд, `AGENT_MAX_TOOL_RETRIES`
 (1, только для `transient`), токены `AGENT_TOKEN_SOFT_LIMIT`/`HARD_LIMIT`
-(действуют **только** если провайдер отдал `usage`; иначе лимиты по времени и
-шагам — и это честно видно в диагностике: `tokens=null`).
+(по умолчанию 50 000 / 100 000; действуют **только** если провайдер отдал `usage`;
+иначе лимиты по времени и шагам — и это честно видно в диагностике:
+`tokens=null`).
 
 При исчерпании бюджета: новые шаги не запускаются, летящий план прерывается по
 дедлайну (`asyncio.wait_for`), выполняется один финальный проход без инструментов

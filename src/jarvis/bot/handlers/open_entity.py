@@ -38,7 +38,13 @@ async def render_task_card(session: AsyncSession, settings: Settings, task_id: u
     if task.category_id:
         category = await CategoryRepository(session).get(task.category_id)
         category_name = category.name if category else None
-    text = task_card_text(task, settings.tz, category_name)
+    project_name = None
+    if task.project_id:
+        from jarvis.repositories.projects import ProjectRepository
+
+        project = await ProjectRepository(session).get(task.project_id)
+        project_name = project.name if project else None
+    text = task_card_text(task, settings.tz, category_name, project_name)
 
     comments = await TaskCommentRepository(session).list_for_task(task_id)
     if comments:

@@ -50,6 +50,8 @@ class TaskUpdate(BaseModel):
     due_at: datetime | None = None
     category_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
+    # Проект назван, но может ещё не существовать — создастся при применении.
+    project_name: str | None = Field(default=None, max_length=200)
 
 
 class CommentDraft(BaseModel):

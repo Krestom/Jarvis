@@ -37,10 +37,16 @@ class TaskService:
         if await self._categories.get(category_id) is None:
             raise OperationError("Категория не найдена")
 
-    async def _resolve_project(self, draft: TaskDraft) -> uuid.UUID | None:
-        if draft.project_id is not None:
-            return draft.project_id
-        name = (draft.project_name or "").strip()
+    async def _ensure_project(self, project_id: uuid.UUID | None) -> None:
+        if project_id is None:
+            return
+        from jarvis.repositories.projects import ProjectRepository
+
+        if await ProjectRepository(self._session).get(project_id) is None:
+            raise OperationError("Проект не найден")
+
+    async def _resolve_project_name(self, name: str) -> uuid.UUID | None:
+        name = (name or "").strip()
         if not name:
             return None
         from jarvis.repositories.projects import ProjectRepository
@@ -50,6 +56,11 @@ class TaskService:
         if project is None:
             project = await repo.create(name=name[:200])
         return project.id
+
+    async def _resolve_project(self, draft: TaskDraft) -> uuid.UUID | None:
+        if draft.project_id is not None:
+            return draft.project_id
+        return await self._resolve_project_name(draft.project_name or "")
 
     async def create_from_draft(self, draft: TaskDraft) -> uuid.UUID:
         await self._ensure_category(draft.category_id)
@@ -70,6 +81,11 @@ class TaskService:
         fields = update.model_dump(exclude_unset=True)
         if "category_id" in fields:
             await self._ensure_category(fields["category_id"])
+        project_name = fields.pop("project_name", None)
+        if project_name and "project_id" not in fields:
+            fields["project_id"] = await self._resolve_project_name(project_name)
+        if "project_id" in fields:
+            await self._ensure_project(fields["project_id"])
         new_status = fields.get("status")
         if new_status is not None and new_status != task.status:
             if new_status == TaskStatus.DONE:

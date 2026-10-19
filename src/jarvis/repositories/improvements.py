@@ -111,6 +111,32 @@ class ImprovementRepository:
         )
         return list(result.scalars().all())
 
+    async def list_first_seen_between(
+        self, start: datetime, end: datetime, *, limit: int = 50
+    ) -> list[ImprovementItem]:
+        """Записи бэклога, впервые появившиеся в интервале."""
+        stmt = (
+            select(ImprovementItem)
+            .where(
+                ImprovementItem.first_seen_at >= start,
+                ImprovementItem.first_seen_at < end,
+            )
+            .order_by(ImprovementItem.first_seen_at.asc())
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def count_first_seen_between(self, start: datetime, end: datetime) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(ImprovementItem)
+            .where(
+                ImprovementItem.first_seen_at >= start,
+                ImprovementItem.first_seen_at < end,
+            )
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
+
     async def counts_by_status(self) -> dict[ImprovementStatus, int]:
         result = await self._session.execute(
             select(ImprovementItem.status, func.count()).group_by(ImprovementItem.status)

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.agent.schemas import EntityCandidate, OutgoingFile
 from jarvis.config.settings import Settings
-from jarvis.domain.buckets import DONE_STATUSES
+from jarvis.domain.buckets import DONE_STATUSES, local_day_start
 from jarvis.domain.enums import (
     ImprovementCategory,
     ImprovementStatus,
@@ -32,6 +32,7 @@ from jarvis.domain.enums import (
     TaskPriority,
     TaskStatus,
 )
+from jarvis.repositories.audit import AuditRepository
 from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.improvements import OPEN_STATUSES, ImprovementRepository
@@ -167,6 +168,12 @@ class UpdateTaskArgs(BaseModel):
     due_at: datetime | None = Field(
         default=None, description="ISO 8601 с часовым поясом; null — убрать срок"
     )
+    project: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Название проекта (создаётся, если его ещё нет); "
+        "«нет»/«без проекта» — убрать проект",
+    )
 
 
 class AddCommentArgs(BaseModel):
@@ -241,6 +248,13 @@ class UpdateImprovementArgs(BaseModel):
     item_id: uuid.UUID = Field(description="id записи бэклога (из list_improvements)")
     status: ImprovementStatus = Field(
         description="new | reviewed | planned | implemented | wont_fix | archived"
+    )
+
+
+class DailyStatsArgs(BaseModel):
+    day: date | None = Field(
+        default=None,
+        description="День (YYYY-MM-DD); по умолчанию — сегодня",
     )
 
 
@@ -380,9 +394,9 @@ _TOOLS: dict[str, ToolMeta] = {
     ),
     "update_task": ToolMeta(
         UpdateTaskArgs,
-        "Изменить разрешённые поля задачи: статус, приоритет, группу, срок, заголовок. "
-        "Отправляет превью с кнопкой подтверждения (изменение применится после "
-        "нажатия). due_at=null — убрать срок.",
+        "Изменить разрешённые поля задачи: статус, приоритет, группу, срок, заголовок, "
+        "проект. Отправляет превью с кнопкой подтверждения (изменение применится после "
+        "нажатия). due_at=null — убрать срок; project=«нет» — убрать проект.",
         mutating=True,
         risk="low",
     ),
@@ -489,8 +503,15 @@ _TOOLS: dict[str, ToolMeta] = {
         mutating=True,
         risk="medium",
     ),
-    "export_chat": ToolMeta(
-        ExportChatArgs,
+    "daily_stats": ToolMeta(
+        DailyStatsArgs,
+        "Дневная статистика: успешные действия по типам (создано/изменено/удалено), "
+        "закрытые задачи и новые записи improvement backlog за день. Используй для "
+        "вопросов «что сделано за день», «сколько закрыто», «что нового в бэклоге».",
+        mutating=False,
+        risk="low",
+    ),
+    "export_chat": ToolMeta(        ExportChatArgs,
         "Выгрузить журнал диалога за день двумя файлами (Markdown + JSON) — они "
         "уйдут в чат вместе с ответом. Текст уже с маскировкой секретов. Используй, "
         "когда просят экспортировать/выгрузить переписку.",
@@ -889,6 +910,36 @@ class ToolRegistry:
             },
         )
 
+    async def _daily_stats(self, args: DailyStatsArgs) -> ToolResult:
+        day = args.day or datetime.now(self._settings.tz).date()
+        start = local_day_start(day, self._settings.tz)
+        end = local_day_start(day + timedelta(days=1), self._settings.tz)
+        actions = await AuditRepository(self._session).count_actions_between(start, end)
+        tasks = TaskRepository(self._session)
+        completed = await tasks.list_completed_between(start, end)
+        completed_count = await tasks.count_completed_between(start, end)
+        improvements = ImprovementRepository(self._session)
+        new_items = await improvements.list_first_seen_between(start, end)
+        new_count = await improvements.count_first_seen_between(start, end)
+        return ToolResult(
+            ok=True,
+            data={
+                "date": day.isoformat(),
+                "actions": actions,
+                "tasks_completed": {
+                    "count": completed_count,
+                    "items": [task.title for task in completed],
+                },
+                "new_improvements": {
+                    "count": new_count,
+                    "items": [
+                        {"title": item.title, "category": item.category.value}
+                        for item in new_items
+                    ],
+                },
+            },
+        )
+
     async def _export_chat(self, args: ExportChatArgs) -> ToolResult:
         from jarvis.services.chatlog import export_chat_day
 
@@ -1149,9 +1200,21 @@ class ToolRegistry:
     async def _update_task(self, args: UpdateTaskArgs) -> ToolResult:
         # exclude_unset: меняем только явно переданные поля; mode="json" — payload уйдёт в JSONB.
         raw = args.model_dump(exclude={"task_id"}, exclude_unset=True, mode="json")
-        changes = {key: value for key, value in raw.items() if value is not None}
+        changes = {
+            key: value for key, value in raw.items() if value is not None and key != "project"
+        }
         if "due_at" in raw and raw["due_at"] is None:
             changes["due_at"] = None  # явный null — убрать срок
+        if raw.get("project") is not None:
+            name = str(raw["project"]).strip()
+            if name.lower() in ("нет", "без проекта", "none", "-"):
+                changes["project_id"] = None
+            else:
+                project = await ProjectRepository(self._session).find_by_name(name)
+                if project is not None:
+                    changes["project_id"] = str(project.id)
+                else:
+                    changes["project_name"] = name  # создастся при подтверждении
         if not changes:
             return ToolResult.failure("validation", "не указаны изменения", mutating=True)
         task = await TaskRepository(self._session).get(args.task_id)
