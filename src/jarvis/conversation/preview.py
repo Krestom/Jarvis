@@ -133,17 +133,34 @@ def task_icon(status: TaskStatus, overdue: bool) -> str:
 
 
 def task_line(
-    task, tz: ZoneInfo, *, index: int | None = None, now: datetime | None = None
+    task,
+    tz: ZoneInfo,
+    *,
+    index: int | None = None,
+    now: datetime | None = None,
+    day=None,
 ) -> str:
-    """Строка списка: статус-иконка, срок, группа, приоритет."""
+    """Строка списка: статус-иконка, срок, группа, приоритет.
+
+    day — день, который уже указан в заголовке списка: у задач этого дня
+    показываем только время (или «весь день»), у остальных — дату и время.
+    """
     overdue = False
-    if now is not None and task.due_at is not None:
-        overdue = task.due_at.astimezone(tz).date() < now.astimezone(tz).date()
+    due_local = task.due_at.astimezone(tz) if task.due_at is not None else None
+    if now is not None and due_local is not None:
+        overdue = due_local.date() < now.astimezone(tz).date()
     prefix = f"{index}. " if index is not None else ""
     line = f"{prefix}{task_icon(task.status, overdue)} {html.escape(str(task.title))}"
     details: list[str] = []
-    if task.due_at is not None:
-        details.append("до " + fmt_dt_local(task.due_at, tz))
+    if due_local is not None:
+        same_day = day is not None and due_local.date() == day
+        if same_day and not overdue:
+            if due_local.hour == 0 and due_local.minute == 0:
+                details.append("весь день")
+            else:
+                details.append(f"до {due_local:%H:%M}")
+        else:
+            details.append("до " + fmt_dt_local(due_local, tz))
     if task.bucket is not None:
         details.append(BUCKET_LABELS.get(TaskBucket(task.bucket), str(task.bucket)))
     if task.priority in (TaskPriority.HIGH, TaskPriority.URGENT):
@@ -153,13 +170,22 @@ def task_line(
     return line
 
 
-def task_list_text(title: str, tasks, tz: ZoneInfo, now: datetime) -> str:
+def task_view_title(view: str, now: datetime, tz: ZoneInfo) -> str:
+    """Заголовок списка; у дневного списка дата стоит здесь один раз."""
+    if view == "today":
+        return f"🔸 Задачи на сегодня, {now.astimezone(tz):%d.%m.%Y}"
+    return TASK_VIEW_TITLES.get(view, "Задачи")
+
+
+def task_list_text(
+    title: str, tasks, tz: ZoneInfo, now: datetime, *, day=None
+) -> str:
     """Текст списка задач (пустой список — «Пусто.»)."""
     if not tasks:
         return f"{title}\n\nПусто."
     lines = [title, ""]
     for index, task in enumerate(tasks, start=1):
-        lines.append(task_line(task, tz, index=index, now=now))
+        lines.append(task_line(task, tz, index=index, now=now, day=day))
     return "\n".join(lines)
 
 
@@ -240,7 +266,7 @@ async def render_preview(
             task = await TaskRepository(session).get(uuid.UUID(str(task_id)))
             if task is not None:
                 lines.append(_line("Задача", task.title))
-                lines.append(_render_task_changes(task, changes, tz))
+                lines.append(await _render_task_changes(session, task, changes, tz))
             else:
                 lines.append("Задача не найдена.\n")
 
@@ -402,7 +428,7 @@ def _render_knowledge_changes(item, changes: dict) -> str:
     return "\n".join(f"• {part}" for part in parts)
 
 
-def _render_task_changes(task, changes: dict, tz: ZoneInfo) -> str:
+async def _render_task_changes(session: AsyncSession, task, changes: dict, tz: ZoneInfo) -> str:
     from jarvis.domain.enums import TaskBucket as Bucket
 
     parts = []
@@ -433,6 +459,10 @@ def _render_task_changes(task, changes: dict, tz: ZoneInfo) -> str:
         old = PRIORITY_LABELS.get(task.priority, task.priority)
         new = PRIORITY_LABELS.get(TaskPriority(changes["priority"]), changes["priority"])
         parts.append(f"приоритет: <i>{old}</i> → {new}")
+    if "project_id" in changes or "project_name" in changes:
+        old = await _project_label(session, {"project_id": task.project_id}) or "нет"
+        new = await _project_label(session, changes) or "нет"
+        parts.append(f"проект: <i>{html.escape(old)}</i> → {html.escape(new)}")
     if not parts:
         return "<i>Нет изменений.</i>"
     return "\n".join(f"• {part}" for part in parts)

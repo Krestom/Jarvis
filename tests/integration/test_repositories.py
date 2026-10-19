@@ -45,8 +45,8 @@ async def test_task_dynamic_bucket_lists(session):
     assert today == {"Сегодня", "Просрочено"}
 
     week = {task.title for task in await repo.list_week(NOW, TZ)}
-    assert "Неделя" in week
-    assert "Сегодня" not in week
+    assert week == {"Неделя", "Сегодня"}
+    assert "Просрочено" not in week
 
     # Месяц — продолжение недели: дальние дни месяца, но не следующего и не неделя.
     month = {task.title for task in await repo.list_month(NOW, TZ)}

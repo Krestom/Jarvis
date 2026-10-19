@@ -73,11 +73,10 @@ class TaskRepository:
     async def list_week(
         self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
     ) -> list[Task]:
-        _, end_today = today_window(now, tz)
-        _, end_week = week_window(now, tz)
-        due_this_week = (Task.due_at >= end_today) & (Task.due_at < end_week)
+        start_week, end_week = week_window(now, tz)
+        due_this_week = (Task.due_at >= start_week) & (Task.due_at < end_week)
         week_bucket_not_today = (Task.bucket == TaskBucket.WEEK) & or_(
-            Task.due_at.is_(None), Task.due_at >= end_today
+            Task.due_at.is_(None), Task.due_at >= start_week
         )
         stmt = (
             select(Task)
@@ -227,6 +226,24 @@ class TaskRepository:
             )
         )
         return int((await self._session.execute(stmt)).scalar_one())
+
+    async def list_completed_between(
+        self, start: datetime, end: datetime, *, limit: int = 50
+    ) -> list[Task]:
+        """Задачи, закрытые в интервале (для дневной статистики)."""
+        stmt = (
+            select(Task)
+            .where(
+                Task.deleted_at.is_(None),
+                Task.status == TaskStatus.DONE,
+                Task.completed_at.is_not(None),
+                Task.completed_at >= start,
+                Task.completed_at < end,
+            )
+            .order_by(Task.completed_at.asc())
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
 
     async def list_by_category(
         self, category_id: uuid.UUID, *, limit: int = 20, offset: int = 0

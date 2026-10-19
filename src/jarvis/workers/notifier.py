@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -177,14 +177,23 @@ async def run_notifier_once(
     return stats
 
 
-def _task_lines(tasks: list, now_local: datetime) -> list[str]:
+def _task_lines(tasks: list, now_local: datetime, day: date | None = None) -> list[str]:
     lines: list[str] = []
     for task in tasks:
         parts = [f"• {task.title}"]
         if task.due_at is not None:
             due_local = task.due_at.astimezone(now_local.tzinfo)
-            marker = "⚠️ " if task.due_at < now_local else ""
-            parts.append(f" — {marker}до {due_local.strftime('%d.%m %H:%M')}")
+            overdue = task.due_at < now_local
+            if day is not None and due_local.date() == day and not overdue:
+                when = (
+                    "весь день"
+                    if due_local.hour == 0 and due_local.minute == 0
+                    else f"до {due_local:%H:%M}"
+                )
+            else:
+                when = f"до {due_local:%d.%m %H:%M}"
+            marker = "⚠️ " if overdue else ""
+            parts.append(f" — {marker}{when}")
         lines.append("".join(parts))
     return lines
 
@@ -205,8 +214,8 @@ async def _digest_text(
         header = "🌆 Добрый вечер!"
     if not today:
         return f"{header} Задач на сегодня нет."
-    lines = [f"{header} Задачи на сегодня:"]
-    lines.extend(_task_lines(today, local_now))
+    lines = [f"{header} Задачи на {local_now:%d.%m.%Y}:"]
+    lines.extend(_task_lines(today, local_now, local_now.date()))
     if len(today) == DIGEST_TASK_LIMIT:  # список мог быть длиннее
         lines.append("…и, возможно, ещё — смотрите /today")
     return "\n".join(lines)
@@ -227,11 +236,11 @@ async def _evening_digest(
     if closed:
         lines.append(f"Закрыто сегодня: {closed}")
     if today_tasks:
-        lines.append("Осталось на сегодня:")
-        lines.extend(_task_lines(today_tasks, local_now))
+        lines.append(f"Осталось на {local_now:%d.%m.%Y}:")
+        lines.extend(_task_lines(today_tasks, local_now, local_now.date()))
     if tomorrow_tasks:
         lines.append("Завтра:")
-        lines.extend(_task_lines(tomorrow_tasks, local_now))
+        lines.extend(_task_lines(tomorrow_tasks, local_now, tomorrow))
     if len(lines) == 1:
         lines.append("На сегодня всё закрыто, на завтра задач нет.")
     return "\n".join(lines)

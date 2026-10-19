@@ -32,6 +32,31 @@ def test_task_list_text_empty() -> None:
     assert task_list_text("🔸 Задачи", [], TZ, NOW) == "🔸 Задачи\n\nПусто."
 
 
+def test_task_list_day_header_shows_time_only() -> None:
+    task = FakeTask(title="Позвонить в банк", due_at=datetime(2026, 10, 19, 18, 0, tzinfo=TZ))
+    line = task_list_text(
+        "🔸 Задачи на 19.10.2026", [task], TZ, NOW, day=datetime(2026, 10, 19).date()
+    ).splitlines()[2]
+    assert "до 18:00" in line
+    assert "октября" not in line
+
+
+def test_task_list_day_header_date_only_is_all_day() -> None:
+    task = FakeTask(title="Оплатить", due_at=datetime(2026, 10, 19, 0, 0, tzinfo=TZ))
+    line = task_list_text(
+        "🔸 Задачи на 19.10.2026", [task], TZ, NOW, day=datetime(2026, 10, 19).date()
+    ).splitlines()[2]
+    assert "весь день" in line
+
+
+def test_task_list_day_header_keeps_date_for_overdue() -> None:
+    task = FakeTask(title="Прошлое", due_at=datetime(2026, 10, 17, 10, 0, tzinfo=TZ))
+    line = task_list_text(
+        "🔸 Задачи на 19.10.2026", [task], TZ, NOW, day=datetime(2026, 10, 19).date()
+    ).splitlines()[2]
+    assert "⚠️" in line and "17 октября 2026, 10:00" in line
+
+
 def test_task_list_text_rich_line() -> None:
     task = FakeTask(
         title="Позвонить в банк",

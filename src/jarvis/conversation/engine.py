@@ -26,10 +26,10 @@ from jarvis.conversation.heuristics import (
     looks_like_search,
 )
 from jarvis.conversation.preview import (
-    TASK_VIEW_TITLES,
     fmt_dt_local,
     render_preview,
     task_list_text,
+    task_view_title,
 )
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import (
@@ -556,15 +556,17 @@ class ConversationEngine:
         """Список задач по динамической группе («какие у меня задачи на неделю»)."""
         if view not in TASK_VIEWS:
             view = "week"
+        now = datetime.now(UTC)
         tasks = await TaskService(self._session).list_view(
             view,
-            now=datetime.now(UTC),
+            now=now,
             tz=self._settings.tz,
             limit=TASK_LIST_LIMIT,
             offset=page * TASK_LIST_LIMIT,
         )
-        title = TASK_VIEW_TITLES.get(view, "Задачи")
-        return self._render_task_list(title, tasks, view=view, page=page)
+        title = task_view_title(view, now, self._settings.tz)
+        day = now.astimezone(self._settings.tz).date() if view == "today" else None
+        return self._render_task_list(title, tasks, view=view, page=page, day=day)
 
     async def _show_tasks_on_date(self, day: date, page: int = 0) -> EngineOutcome:
         """Список задач с дедлайном на конкретный день («задачи на 19 октября»)."""
@@ -580,6 +582,7 @@ class ConversationEngine:
             view="date",
             page=page,
             value=day.isoformat(),
+            day=day,
         )
 
     async def _show_tasks_in_category(self, name: str, page: int = 0) -> EngineOutcome:
@@ -649,8 +652,11 @@ class ConversationEngine:
         view: str | None = None,
         page: int = 0,
         value: str = "",
+        day=None,
     ) -> EngineOutcome:
-        text = task_list_text(title, tasks, self._settings.tz, datetime.now(UTC))
+        text = task_list_text(
+            title, tasks, self._settings.tz, datetime.now(UTC), day=day
+        )
         if not tasks:
             return EngineOutcome(text, menu=self._menu_flag())
         return EngineOutcome(

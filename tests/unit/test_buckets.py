@@ -48,7 +48,7 @@ def test_due_yesterday_is_overdue_and_today() -> None:
     assert placement.today
 
 
-def test_due_today_is_today() -> None:
+def test_due_today_is_today_and_week() -> None:
     placement = place_task(
         status=TaskStatus.TODO,
         bucket=None,
@@ -58,6 +58,7 @@ def test_due_today_is_today() -> None:
     )
     assert not placement.overdue
     assert placement.today
+    assert placement.this_week
 
 
 def test_due_within_week_is_week() -> None:
@@ -92,7 +93,7 @@ def test_bucket_week_is_week() -> None:
     assert placement.this_week
 
 
-def test_bucket_week_with_due_today_is_only_today() -> None:
+def test_bucket_week_with_due_today_is_today_and_week() -> None:
     placement = place_task(
         status=TaskStatus.TODO,
         bucket=TaskBucket.WEEK,
@@ -101,7 +102,7 @@ def test_bucket_week_with_due_today_is_only_today() -> None:
         tz=TZ,
     )
     assert placement.today
-    assert not placement.this_week
+    assert placement.this_week
 
 
 def test_bucket_long_term_not_in_dynamic_lists() -> None:
@@ -145,8 +146,8 @@ def test_next_week_monday_midnight_not_this_week() -> None:
 
 
 def test_week_window_boundaries() -> None:
-    end_today, end_week = week_window(now_thursday(), TZ)
-    assert end_today == datetime(2026, 10, 16, 0, 0, tzinfo=TZ)
+    start_today, end_week = week_window(now_thursday(), TZ)
+    assert start_today == datetime(2026, 10, 15, 0, 0, tzinfo=TZ)
     assert end_week == datetime(2026, 10, 19, 0, 0, tzinfo=TZ)
 
 
@@ -156,7 +157,7 @@ def test_local_date_converts_utc_to_user_tz() -> None:
 
 
 def test_weekend_now() -> None:
-    # В воскресенье «на этой неделе» список схлопывается: остаются только сегодня.
+    # В воскресенье неделя заканчивается сегодня: задача на сегодня попадает в оба списка.
     sunday = datetime(2026, 10, 18, 10, 0, tzinfo=TZ)
     placement = place_task(
         status=TaskStatus.TODO,
@@ -166,4 +167,4 @@ def test_weekend_now() -> None:
         tz=TZ,
     )
     assert placement.today
-    assert not placement.this_week
+    assert placement.this_week

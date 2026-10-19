@@ -69,7 +69,7 @@ def place_task(
     in_today = overdue or due_day == today or bucket is TaskBucket.TODAY
     _, sunday = week_bounds(today)
     in_week = (
-        due_day is not None and today < due_day <= sunday
+        due_day is not None and today <= due_day <= sunday
     ) or (bucket is TaskBucket.WEEK and not in_today)
     return Placement(overdue=overdue, today=in_today, this_week=in_week)
 
@@ -85,12 +85,15 @@ def today_window(now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime]:
 
 
 def week_window(now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime]:
-    """Границы списка «На этой неделе»: (конец сегодняшнего дня, конец недели)."""
+    """Границы списка «На этой неделе»: (начало сегодняшнего дня, конец недели).
+
+    Прошедшие дни не входят: просроченное остаётся в «Сегодня».
+    """
     today = local_date(now, tz)
     _, sunday = week_bounds(today)
-    end_today = local_day_start(today + timedelta(days=1), tz)
+    start_today = local_day_start(today, tz)
     end_week = local_day_start(sunday + timedelta(days=1), tz)
-    return end_today, end_week
+    return start_today, end_week
 
 
 def month_window(now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime]:

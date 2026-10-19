@@ -27,7 +27,7 @@ from jarvis.bot.keyboards import (
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
-from jarvis.conversation.preview import TASK_VIEW_TITLES, task_list_text
+from jarvis.conversation.preview import task_list_text, task_view_title
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import PendingOpType, TaskBucket
 from jarvis.repositories.categories import CategoryRepository
@@ -43,6 +43,7 @@ async def build_task_list(
 ) -> tuple[str, object]:
     service = TaskService(session)
     now = datetime.now(UTC)
+    day = None
     if view == "date":
         try:
             day = date.fromisoformat(value)
@@ -70,8 +71,10 @@ async def build_task_list(
         tasks = await service.list_view(
             view, now=now, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
         )
-        title = TASK_VIEW_TITLES.get(view, "Задачи")
-    text = task_list_text(title, tasks, settings.tz, now)
+        title = task_view_title(view, now, settings.tz)
+        if view == "today":
+            day = now.astimezone(settings.tz).date()
+    text = task_list_text(title, tasks, settings.tz, now, day=day)
     markup = task_list_keyboard(
         tasks, view, page, has_next=len(tasks) >= PAGE_SIZE, value=value
     )
