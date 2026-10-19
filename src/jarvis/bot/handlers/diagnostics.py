@@ -26,6 +26,7 @@ from jarvis.bot.keyboards import (
     backlog_list_keyboard,
     diagnostics_keyboard,
 )
+from jarvis.bot.ui_state import stale_message
 from jarvis.config.settings import Settings
 from jarvis.conversation.preview import fmt_dt_local
 from jarvis.db.models import Document, ImprovementItem, KnowledgeItem, Secret, Task
@@ -232,6 +233,9 @@ async def build_backlog_page(
 
 
 async def _edit_or_answer(callback: CallbackQuery, text: str, markup) -> None:
+    if stale_message.get():
+        await callback.message.answer(text, reply_markup=markup)
+        return
     try:
         await callback.message.edit_text(text, reply_markup=markup)
     except Exception:  # noqa: BLE001 - сообщение могло быть недоступно для правки

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.bot.callbacks import AgentPickCB
 from jarvis.bot.formatting import esc
+from jarvis.bot.ui_state import stale_message
 from jarvis.config.settings import Settings
 from jarvis.conversation.state import ConversationStore
 from jarvis.repositories.conversation import ConversationRepository
@@ -73,12 +74,14 @@ async def agent_pick(
     await callback.answer("Выбрано")
 
     label = {"task": "задачу", "knowledge": "запись", "project": "проект"}.get(kind, "запись")
-    try:
-        await callback.message.edit_text(
-            f"✅ Выбрал {label}: <b>{esc(fresh_title)}</b>"
-        )
-    except Exception:  # noqa: BLE001 - сообщение могло быть недоступно для правки
-        await callback.message.answer(f"✅ Выбрал {label}: <b>{esc(fresh_title)}</b>")
+    text = f"✅ Выбрал {label}: <b>{esc(fresh_title)}</b>"
+    if stale_message.get():
+        await callback.message.answer(text)
+    else:
+        try:
+            await callback.message.edit_text(text)
+        except Exception:  # noqa: BLE001 - сообщение могло быть недоступно для правки
+            await callback.message.answer(text)
     await callback.message.answer(
         "Что с ним сделать? Напишите естественно, например: "
         "«добавь комментарий: проверил конфигурацию», «отметь выполненной», "

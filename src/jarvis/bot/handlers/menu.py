@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import MenuCB
+from jarvis.bot.ui_state import stale_message
 from jarvis.config.settings import Settings
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
@@ -24,6 +25,9 @@ async def _edit_or_send(callback: CallbackQuery, text: str, markup, *, with_menu
 
     reply_markup = main_menu() if with_menu else markup
     message = callback.message
+    if stale_message.get():
+        await message.answer(text, reply_markup=reply_markup)
+        return
     try:
         await message.edit_text(text, reply_markup=reply_markup)
     except Exception:  # noqa: BLE001 - старое сообщение могло быть недоступно для правки

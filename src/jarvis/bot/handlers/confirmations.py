@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import ConfirmCB, MenuCB
 from jarvis.bot.texts import CALLBACK_STALE, CONFIRM_ALREADY, CONFIRM_APPLIED, CONFIRM_FAILED
+from jarvis.bot.ui_state import stale_message
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 from jarvis.domain.enums import PendingOpType
@@ -51,7 +52,7 @@ async def _update_message(
         if nav is not None
         else None
     )
-    if len(updated) > MESSAGE_LIMIT:
+    if len(updated) > MESSAGE_LIMIT or stale_message.get():
         await message.answer(suffix.strip(), reply_markup=markup)
         return
     try:

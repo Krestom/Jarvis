@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import itertools
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
@@ -188,9 +188,18 @@ class BotHarness:
         )
         return await self._feed(Update(update_id=self._next_update_id(), message=message))
 
-    async def click_button(self, user_id: int, message: Message, label: str) -> list[Message]:
+    async def click_button(
+        self,
+        user_id: int,
+        message: Message,
+        label: str,
+        *,
+        sent_ago: timedelta | None = None,
+    ) -> list[Message]:
         # Сообщение могло быть отредактировано ботом — берём актуальную версию.
         current = self.current(message)
+        if sent_ago is not None:
+            current = current.model_copy(update={"date": datetime.now(UTC) - sent_ago})
         button_data = _find_button(current.reply_markup, label)
         assert button_data is not None, f"button {label!r} not found"
         callback = CallbackQuery(

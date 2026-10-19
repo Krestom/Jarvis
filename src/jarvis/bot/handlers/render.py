@@ -20,6 +20,7 @@ from jarvis.bot.keyboards import (
     quick_actions_keyboard,
     search_results_keyboard,
 )
+from jarvis.bot.ui_state import stale_message
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import EngineOutcome
 
@@ -58,7 +59,7 @@ async def send_or_edit(
     """
     chunks = split_message(text)
     last_index = len(chunks) - 1
-    if edit:
+    if edit and not stale_message.get():
         try:
             await message.edit_text(
                 chunks[0], reply_markup=markup if last_index == 0 else None

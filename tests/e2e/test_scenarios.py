@@ -24,6 +24,7 @@ from jarvis.domain.enums import (
     TaskBucket,
 )
 from jarvis.repositories.categories import CategoryRepository
+from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.improvements import ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
@@ -185,6 +186,27 @@ async def test_scenario_voice_task(classic_settings, session_factory, session):
     tasks = await TaskRepository(session).list_week(datetime.now(UTC), classic_settings.tz)
     assert len(tasks) == 1
     assert tasks[0].title == "Обновить инфраструктуру"
+
+
+async def test_stale_button_sends_new_message_and_resets_flow(
+    classic_settings, session_factory, session
+):
+    harness = await make_harness(classic_settings, session_factory)
+    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    menu_message = keyboard_messages(messages)[-1]
+    await harness.send_text(DEFAULT_USER_ID, "/secret")
+    assert await ConversationRepository(session).get(DEFAULT_USER_ID) is not None
+
+    replies = await harness.click_button(
+        DEFAULT_USER_ID,
+        menu_message,
+        "Сегодня",
+        sent_ago=timedelta(minutes=15),
+    )
+    # Сценарий сброшен, а результат ушёл новым сообщением вниз (не правкой старого).
+    assert await ConversationRepository(session).get(DEFAULT_USER_ID) is None
+    assert replies
+    assert any("Задачи на сегодня" in (m.text or "") for m in replies)
 
 
 # 2b. Ошибка/лимит транскрибации показывается прямо в чате.
