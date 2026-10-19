@@ -106,8 +106,8 @@ class Settings(BaseSettings):
     agent_web_queries_planning: int = 3
     agent_web_queries_research: int = 8
     # Мягкий/жёсткий лимит токенов (действует, только если провайдер отдаёт usage).
-    agent_token_soft_limit: int = 25000
-    agent_token_hard_limit: int = 50000
+    agent_token_soft_limit: int = 50000
+    agent_token_hard_limit: int = 100000
     # Маркеры профилей (нижний регистр, подстрока в тексте запроса).
     agent_planning_markers: str = "спланир,план на,планируем,составь план"
     agent_research_markers: str = "исследуй,глубокий поиск,разберись детально,research"

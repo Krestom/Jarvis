@@ -463,7 +463,13 @@ def _finding(tool_name: str, result: ToolResult) -> str:
     data = result.data or {}
     if tool_name == "list_tasks":
         items = data.get("items") or []
-        return f"задачи ({data.get('view')}): " + ", ".join(item["title"] for item in items[:5])
+        label = (
+            data.get("view")
+            or data.get("date")
+            or data.get("category")
+            or "без фильтра"
+        )
+        return f"задачи ({label}): " + ", ".join(item["title"] for item in items[:5])
     if tool_name in ("search_tasks", "search_all"):
         items = data.get("items") or []
         titles = ", ".join(item["title"] for item in items[:5])
