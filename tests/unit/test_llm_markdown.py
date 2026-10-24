@@ -56,6 +56,11 @@ def test_agent_prompt_forbids_service_talk():
     assert "не упоминай служебные детали" in SYSTEM_HEADER
 
 
+def test_agent_prompt_lightly_edits_user_text():
+    assert "слегка вычитывай" in SYSTEM_HEADER
+    assert "не меняй смысл, имена" in SYSTEM_HEADER.lower()
+
+
 # --- Раскладка (normalize_llm_layout) ----------------------------------------
 
 
