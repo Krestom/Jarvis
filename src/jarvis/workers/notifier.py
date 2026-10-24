@@ -28,8 +28,11 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jarvis.bot.callbacks import uuid_hex
+from jarvis.bot.keyboards import reminder_keyboard
 from jarvis.config.settings import Settings
 from jarvis.db.session import session_scope
 from jarvis.repositories.notifications import NotificationRepository
@@ -44,7 +47,7 @@ DIGEST_TASK_LIMIT = 7
 DIGEST_WINDOW_MINUTES = 30
 EVENING_HOUR = 20  # сводки в 20:00 и позже — расширенный вечерний формат
 
-SendMessage = Callable[[int, str], Awaitable[None]]
+SendMessage = Callable[[int, str, InlineKeyboardMarkup | None], Awaitable[None]]
 
 
 def parse_digest_time(raw: str) -> time | None:
@@ -105,8 +108,8 @@ async def run_notifier_once(
     owner = settings.telegram_allowed_user_ids[0]
     now = datetime.now(UTC)
     local_now = now.astimezone(settings.tz)
-    # (kind, ref, текст) — отправляется после коммита отметок.
-    to_send: list[tuple[str, str, str]] = []
+    # (kind, ref, текст, клавиатура) — отправляется после коммита отметок.
+    to_send: list[tuple[str, str, str, InlineKeyboardMarkup | None]] = []
     async with session_scope(session_factory) as session:
         repo = NotificationRepository(session)
         if settings.notify_due_reminders:
@@ -122,7 +125,12 @@ async def run_notifier_once(
                     if not await repo.mark_if_new("task_due_soon", _task_ref(task)):
                         continue
                     to_send.append(
-                        ("task_due_soon", _task_ref(task), _due_soon_text(task, now, settings.tz))
+                        (
+                            "task_due_soon",
+                            _task_ref(task),
+                            _due_soon_text(task, now, settings.tz),
+                            reminder_keyboard(uuid_hex(task.id)),
+                        )
                     )
                     sent += 1
             overdue = await TaskRepository(session).list_due_before(
@@ -139,6 +147,7 @@ async def run_notifier_once(
                         "task_due",
                         _task_ref(task),
                         f"⏰ Пора заниматься: «{task.title}» — срок {due}. Открыть: /tasks",
+                        reminder_keyboard(uuid_hex(task.id)),
                     )
                 )
                 sent += 1
@@ -153,13 +162,18 @@ async def run_notifier_once(
             if not await repo.mark_if_new("digest", ref):
                 continue
             to_send.append(
-                ("digest", ref, await _digest_text(session, settings, local_now, digest_at))
+                (
+                    "digest",
+                    ref,
+                    await _digest_text(session, settings, local_now, digest_at),
+                    None,
+                )
             )
 
     stats = {"due": 0, "due_soon": 0, "digest": 0}
-    for kind, ref, text in to_send:
+    for kind, ref, text, markup in to_send:
         try:
-            await send(owner, text)
+            await send(owner, text, markup)
         except Exception:  # noqa: BLE001 - отправка повторится в следующий проход
             log.exception("notifier: failed to send %s %s", kind, ref)
             try:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, date, datetime
 
 from aiogram import Router
@@ -29,7 +30,9 @@ from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.preview import task_list_text, task_view_title
 from jarvis.conversation.state import ConversationStore
+from jarvis.domain.buckets import DONE_STATUSES
 from jarvis.domain.enums import PendingOpType, TaskBucket
+from jarvis.repositories.audit import AuditRepository
 from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
@@ -201,6 +204,25 @@ async def task_action(
             user_id,
             PendingOpType.UPDATE_TASK,
             {"task_id": str(task.id), "changes": {"bucket": bucket}},
+        )
+        return
+
+    if action == "complete":
+        with contextlib.suppress(Exception):
+            await callback.message.edit_reply_markup(reply_markup=None)
+        if task.status in DONE_STATUSES:
+            await callback.answer("Задача уже закрыта")
+            return
+        await TaskService(session).apply_update(task.id, {"status": "done"})
+        await AuditRepository(session).log(
+            actor=f"telegram:{user_id}",
+            action="reminder:complete",
+            entity_type="task",
+            entity_id=task.id,
+        )
+        await callback.answer("Готово")
+        await send_or_edit(
+            callback.message, f"✅ Задача «{esc(task.title)}» завершена.", edit=True
         )
         return
 

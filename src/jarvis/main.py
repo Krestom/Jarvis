@@ -7,6 +7,7 @@ import logging
 import signal
 
 import uvicorn
+from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -130,8 +131,10 @@ async def amain() -> int:
 
     notifier_task = None
     if bot is not None and settings.notify_enabled:
-        async def _notify(chat_id: int, text: str) -> None:
-            await bot.send_message(chat_id, text, parse_mode=None)
+        async def _notify(
+            chat_id: int, text: str, reply_markup: InlineKeyboardMarkup | None = None
+        ) -> None:
+            await bot.send_message(chat_id, text, parse_mode=None, reply_markup=reply_markup)
 
         notifier_task = asyncio.create_task(
             notifier_loop(session_factory, settings, stop, _notify), name="notifier"

@@ -32,7 +32,7 @@ async def test_due_reminder_sent_once(test_settings, session_factory, session):
 
     sent: list[tuple[int, str]] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append((chat_id, text))
 
     stats = await run_notifier_once(session_factory, test_settings, _send)
@@ -43,6 +43,34 @@ async def test_due_reminder_sent_once(test_settings, session_factory, session):
     stats = await run_notifier_once(session_factory, test_settings, _send)
     assert stats["due"] == 0
     assert sent == []
+
+
+async def test_due_reminder_has_complete_button(test_settings, session_factory, session):
+    from jarvis.bot.callbacks import TaskCB, uuid_hex
+
+    test_settings.notify_enabled = True
+    test_settings.notify_due_reminders = True
+    test_settings.notify_digest_times = _digest_outside_window(test_settings)
+
+    task_id = await TaskService(session).create_from_draft(
+        TaskDraft(title="Позвонить", due_at=datetime.now(UTC) - timedelta(minutes=5))
+    )
+    await session.commit()
+
+    sent: list[tuple[str, object]] = []
+
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
+        sent.append((text, reply_markup))
+
+    await run_notifier_once(session_factory, test_settings, _send)
+    assert len(sent) == 1
+    text, markup = sent[0]
+    assert "Позвонить" in text
+    assert markup is not None
+    button_data = markup.inline_keyboard[0][0].callback_data
+    parsed = TaskCB.unpack(button_data)
+    assert parsed.action == "complete"
+    assert parsed.task_id == uuid_hex(task_id)
 
 
 async def test_due_soon_reminder_fires_once_and_rearms_on_move(
@@ -62,7 +90,7 @@ async def test_due_soon_reminder_fires_once_and_rearms_on_move(
 
     sent: list[str] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append(text)
 
     stats = await run_notifier_once(session_factory, test_settings, _send)
@@ -95,7 +123,7 @@ async def test_task_due_reminder_rearms_on_move(test_settings, session_factory, 
 
     sent: list[str] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append(text)
 
     stats = await run_notifier_once(session_factory, test_settings, _send)
@@ -129,7 +157,7 @@ async def test_reminders_do_not_starve_beyond_per_pass_limit(
 
     sent: list[str] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append(text)
 
     first = await run_notifier_once(session_factory, test_settings, _send)
@@ -153,7 +181,7 @@ async def test_digest_sent_once_per_day(test_settings, session_factory, session)
 
     sent: list[str] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append(text)
 
     stats = await run_notifier_once(session_factory, test_settings, _send)
@@ -177,7 +205,7 @@ async def test_multiple_digests_per_day_are_independent(test_settings, session_f
 
     sent: list[str] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append(text)
 
     stats = await run_notifier_once(session_factory, test_settings, _send)
@@ -211,7 +239,7 @@ async def test_evening_digest_shows_closed_remaining_and_tomorrow(
 
     sent: list[str] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append(text)
 
     stats = await run_notifier_once(session_factory, test_settings, _send)
@@ -236,7 +264,7 @@ async def test_evening_digest_empty_day(test_settings, session_factory, session,
 
     sent: list[str] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append(text)
 
     stats = await run_notifier_once(session_factory, test_settings, _send)
@@ -286,7 +314,7 @@ async def test_date_only_due_skips_due_soon(
 
     sent: list[str] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append(text)
 
     stats = await run_notifier_once(session_factory, test_settings, _send)
@@ -315,7 +343,7 @@ async def test_overdue_date_only_skips_due_reminder(
 
     sent: list[str] = []
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         sent.append(text)
 
     stats = await run_notifier_once(session_factory, test_settings, _send)
@@ -346,7 +374,7 @@ async def test_failed_send_keeps_marks_and_retries(
     sent: list[str] = []
     fail_once = {"armed": True}
 
-    async def _send(chat_id: int, text: str) -> None:
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
         if fail_once["armed"]:
             fail_once["armed"] = False
             raise RuntimeError("telegram unavailable")

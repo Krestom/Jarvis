@@ -22,6 +22,7 @@ from jarvis.domain.enums import (
     ImprovementSource,
     ImprovementStatus,
     TaskBucket,
+    TaskStatus,
 )
 from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.conversation import ConversationRepository
@@ -206,6 +207,28 @@ async def test_stale_button_sends_new_message_and_resets_flow(
     assert await ConversationRepository(session).get(DEFAULT_USER_ID) is None
     assert replies
     assert any("Задачи на сегодня" in (m.text or "") for m in replies)
+
+
+async def test_reminder_complete_button_closes_task(
+    classic_settings, session_factory, session
+):
+    from jarvis.bot.callbacks import uuid_hex
+    from jarvis.bot.keyboards import reminder_keyboard
+
+    task_id = await TaskService(session).create_from_draft(TaskDraft(title="Позвонить в банк"))
+    await session.commit()
+    harness = await make_harness(classic_settings, session_factory)
+    reminder = await harness.bot.send_message(
+        DEFAULT_USER_ID,
+        "⏰ Пора заниматься: «Позвонить в банк»",
+        reply_markup=reminder_keyboard(uuid_hex(task_id)),
+    )
+
+    await harness.click_button(DEFAULT_USER_ID, reminder, "Завершена")
+
+    task = await TaskRepository(session).get(task_id)
+    assert task.status == TaskStatus.DONE
+    assert "завершена" in (harness.current(reminder).text or "").lower()
 
 
 # 2b. Ошибка/лимит транскрибации показывается прямо в чате.
@@ -1003,7 +1026,7 @@ async def test_scenario_tasks_by_category(classic_settings, session_factory, ses
     assert "Выберите задачу:" in (list_view.text or "")
 
 
-# 23. Меню задач: месяц вместо Inbox и «Когда-нибудь».
+# 23. Меню задач: месяц вместо Inbox и «Когда-нибудь», все задачи вместо долгосрочных.
 async def test_tasks_menu_month_view(classic_settings, session_factory, session):
     harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
 
@@ -1011,12 +1034,18 @@ async def test_tasks_menu_month_view(classic_settings, session_factory, session)
     menu = keyboard_messages(messages)[-1]
     labels = [button.text for row in menu.reply_markup.inline_keyboard for button in row]
     assert "📅 В этом месяце" in labels
-    assert "🗓 Долгосрочные" in labels
+    assert "📋 Все задачи" in labels
+    assert "🗓 Долгосрочные" not in labels
     assert "📥 Без срока" in labels
     assert "🌀 Inbox" not in labels
     assert "💭 Когда-нибудь" not in labels
 
+    await harness.click_button(DEFAULT_USER_ID, menu, "Все задачи")
+    assert "📋 Все задачи" in (harness.current(menu).text or "")
+
     # Кнопка месяца открывает список (классический обработчик TaskListCB).
+    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    menu = keyboard_messages(messages)[-1]
     await harness.click_button(DEFAULT_USER_ID, menu, "В этом месяце")
     assert "📅 В этом месяце" in (harness.current(menu).text or "")
 

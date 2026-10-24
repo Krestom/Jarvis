@@ -147,7 +147,7 @@ def tasks_menu_keyboard() -> InlineKeyboardMarkup:
         ("today", "🔸 Сегодня"),
         ("week", "📆 На этой неделе"),
         ("month", "📅 В этом месяце"),
-        ("long_term", "🗓 Долгосрочные"),
+        ("all", "📋 Все задачи"),
         ("no_group", "📥 Без срока"),
         ("done", "✅ Выполненные"),
     ]
@@ -199,6 +199,21 @@ def task_list_keyboard(
         InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack()),
     )
     return builder.as_markup()
+
+
+def reminder_keyboard(task_id: str) -> InlineKeyboardMarkup:
+    """Кнопка под напоминанием: завершить задачу одним нажатием."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Завершена",
+                    callback_data=TaskCB(action="complete", task_id=task_id).pack(),
+                    style="success",
+                )
+            ]
+        ]
+    )
 
 
 def task_card_keyboard(task_id: str, status: str, comments_count: int = 0) -> InlineKeyboardMarkup:
