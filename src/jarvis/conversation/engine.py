@@ -234,9 +234,10 @@ class ConversationEngine:
 
         if state is not None and state.flow == Flow.DIARY_WAIT:
             await self._store.clear(telegram_user_id)
-            today = datetime.now(UTC).astimezone(self._settings.tz).date()
+            moment = datetime.now(UTC)
+            today = moment.astimezone(self._settings.tz).date()
             entry = await DiaryRepository(self._session).create(
-                telegram_user_id, text[:4000], entry_date=today
+                telegram_user_id, text[:4000], entry_date=today, now=moment
             )
             stamp = entry.created_at.astimezone(self._settings.tz).strftime("%H:%M")
             return EngineOutcome(f"📔 Записано в {stamp}.", ui_actions=["diary"])
