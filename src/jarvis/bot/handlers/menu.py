@@ -92,6 +92,15 @@ async def menu_documents(callback: CallbackQuery, session: AsyncSession) -> None
     await send_documents_list(callback.message, session, page=0, edit=True)
 
 
+async def menu_diary(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+) -> None:
+    from jarvis.bot.handlers.diary import send_diary_day
+
+    await callback.answer()
+    await send_diary_day(callback.message, session, settings, edit=True)
+
+
 async def menu_secrets(
     callback: CallbackQuery, session: AsyncSession, settings: Settings
 ) -> None:
@@ -252,6 +261,7 @@ def build_router() -> Router:
     router.callback_query.register(menu_tasks, MenuCBFilter("tasks"))
     router.callback_query.register(menu_knowledge, MenuCBFilter("knowledge"))
     router.callback_query.register(menu_documents, MenuCBFilter("documents"))
+    router.callback_query.register(menu_diary, MenuCBFilter("diary"))
     router.callback_query.register(menu_secrets, MenuCBFilter("secrets"))
     router.callback_query.register(menu_secret_new, MenuCBFilter("secret_new"))
     router.callback_query.register(menu_projects, MenuCBFilter("projects"))

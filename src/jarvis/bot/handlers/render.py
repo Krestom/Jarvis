@@ -20,7 +20,7 @@ from jarvis.bot.keyboards import (
     quick_actions_keyboard,
     search_results_keyboard,
 )
-from jarvis.bot.ui_state import stale_message
+from jarvis.bot.ui_state import remember_task_list, stale_message
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import EngineOutcome
 
@@ -142,6 +142,7 @@ async def send_outcome(
         view, page, value, has_next = outcome.task_page
         list_markup = task_list_keyboard(outcome.task_choices, view, page, has_next, value)
         list_prompt = outcome.task_choices_prompt or "Выберите задачу:"
+        remember_task_list(message.chat.id, view, page, value)
     elif outcome.documents:
         from jarvis.bot.keyboards import PAGE_SIZE, documents_list_keyboard
 

@@ -107,6 +107,17 @@ def document_card_text(document, category_name: str | None = None) -> str:
     return "\n".join(lines)
 
 
+def diary_day_text(day, entries, tz: ZoneInfo, *, is_today: bool) -> str:
+    title = f"📔 Дневник — {'сегодня, ' if is_today else ''}{day:%d.%m.%Y}"
+    if not entries:
+        return f"{title}\n\nПока пусто."
+    blocks = [title]
+    for index, entry in enumerate(entries, start=1):
+        stamp = entry.created_at.astimezone(tz).strftime("%H:%M")
+        blocks.append(f"<b>{index}. {stamp}</b>\n{esc(entry.content)}")
+    return "\n\n".join(blocks)
+
+
 def secret_card_text(secret, project_name: str | None = None) -> str:
     lines = [
         f"<b>Секрет:</b> {esc(secret.name)}",

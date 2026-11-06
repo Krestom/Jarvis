@@ -33,6 +33,7 @@ BOT_COMMANDS = [
     BotCommand(command="today", description="Задачи на сегодня"),
     BotCommand(command="inbox", description="Неразобранное"),
     BotCommand(command="documents", description="Документы"),
+    BotCommand(command="diary", description="Дневник"),
     BotCommand(command="secret", description="Секреты"),
     BotCommand(command="settings", description="Настройки"),
     BotCommand(command="diagnostics", description="Диагностика и backlog"),

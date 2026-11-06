@@ -3,6 +3,27 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class TaskListTarget:
+    view: str
+    page: int
+    value: str = ""
+
+
+_task_list_targets: dict[int, TaskListTarget] = {}
+
+
+def remember_task_list(
+    chat_id: int, view: str, page: int, value: str = ""
+) -> None:
+    _task_list_targets[chat_id] = TaskListTarget(view=view, page=page, value=value)
+
+
+def last_task_list(chat_id: int) -> TaskListTarget | None:
+    return _task_list_targets.get(chat_id)
 
 
 class MessageTracker:

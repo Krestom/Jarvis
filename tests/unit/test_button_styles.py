@@ -12,6 +12,7 @@ from jarvis.bot.keyboards import (
     cancel_flow_keyboard,
     comments_keyboard,
     confirm_keyboard,
+    diary_reminder_keyboard,
     document_card_keyboard,
     knowledge_card_keyboard,
     secret_card_keyboard,
@@ -50,6 +51,20 @@ def test_task_card_colors():
     assert styles["📅 Изменить срок"] is None
     assert styles["💬 Комментарии (2)"] is None
     assert styles["📋 К спискам"] is None
+
+
+def test_task_card_back_from_list():
+    styles = styles_by_text(
+        task_card_keyboard("ab" * 16, "todo", from_list=True)
+    )
+    assert styles["⬅️ Назад"] is None
+    assert "📋 К спискам" not in styles
+
+
+def test_diary_reminder_colors():
+    styles = styles_by_text(diary_reminder_keyboard())
+    assert styles["✍️ Сделать запись"] == "primary"
+    assert styles["⏰ Перенести"] is None
 
 
 def test_knowledge_card_delete_is_danger():

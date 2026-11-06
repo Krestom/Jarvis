@@ -43,6 +43,7 @@ from jarvis.domain.enums import (
 from jarvis.logging_setup import get_correlation_id
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
+from jarvis.repositories.diary import DiaryRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.projects import ProjectRepository
@@ -230,6 +231,27 @@ class ConversationEngine:
                 PendingOpType.UPDATE_COMMENT,
                 {"comment_id": comment_id, "task_id": task_id, "content": text[:4000]},
             )
+
+        if state is not None and state.flow == Flow.DIARY_WAIT:
+            await self._store.clear(telegram_user_id)
+            today = datetime.now(UTC).astimezone(self._settings.tz).date()
+            entry = await DiaryRepository(self._session).create(
+                telegram_user_id, text[:4000], entry_date=today
+            )
+            stamp = entry.created_at.astimezone(self._settings.tz).strftime("%H:%M")
+            return EngineOutcome(f"📔 Записано в {stamp}.", ui_actions=["diary"])
+
+        if state is not None and state.flow == Flow.DIARY_EDIT_WAIT:
+            entry_id = str(state.data.get("entry_id", ""))
+            await self._store.clear(telegram_user_id)
+            if not entry_id:
+                return EngineOutcome("Запись потерялась, откройте дневник заново.")
+            repo = DiaryRepository(self._session)
+            entry = await repo.get(telegram_user_id, uuid.UUID(entry_id))
+            if entry is None:
+                return EngineOutcome("Запись не найдена.", menu=self._menu_flag())
+            await repo.update_content(entry, text[:4000])
+            return EngineOutcome("📔 Запись обновлена.", ui_actions=["diary"])
 
         # --- Stage 3: AI-агент ---
         # Весь текст уходит агенту (кроме пошаговых сценариев выше и ввода

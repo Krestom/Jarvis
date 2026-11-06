@@ -20,9 +20,15 @@ class TaskListCB(CallbackData, prefix="tl"):
 
 
 class TaskCB(CallbackData, prefix="tsk"):
-    action: str  # view | due | bucket | done | delete | related | reopen
+    action: str  # view | due | bucket | done | delete | related | reopen | back | complete
     task_id: str = ""  # uuid.hex
     value: str = ""
+
+
+class DiaryCB(CallbackData, prefix="dr"):
+    action: str  # day | write | edit | delete | delete_yes | cancel | snooze
+    entry_id: str = ""
+    day: str = ""  # ISO-дата экрана
 
 
 class KbListCB(CallbackData, prefix="kl"):

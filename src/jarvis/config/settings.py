@@ -133,6 +133,11 @@ class Settings(BaseSettings):
     pending_operation_ttl_minutes: int = 30
     processed_updates_retention_hours: int = 72
 
+    # --- Личный дневник ---
+    diary_enabled: bool = True
+    # Время напоминания в рабочие дни (Пн–Пт), локальное время APP_TIMEZONE.
+    diary_reminder_time: str = "16:30"
+
     # --- Валидаторы ---
 
     @field_validator("telegram_allowed_user_ids", mode="before")

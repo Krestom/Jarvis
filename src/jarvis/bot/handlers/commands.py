@@ -76,6 +76,14 @@ async def cmd_documents(message: Message, session: AsyncSession) -> None:
     await send_documents_list(message, session, page=0)
 
 
+async def cmd_diary(
+    message: Message, session: AsyncSession, settings: Settings
+) -> None:
+    from jarvis.bot.handlers.diary import send_diary_day
+
+    await send_diary_day(message, session, settings)
+
+
 async def cmd_secret(
     message: Message, session: AsyncSession, settings: Settings, ai: AIProvider
 ) -> None:
@@ -100,6 +108,7 @@ def build_router() -> Router:
     router.message.register(cmd_today, Command("today"))
     router.message.register(cmd_inbox, Command("inbox"))
     router.message.register(cmd_documents, Command("documents"))
+    router.message.register(cmd_diary, Command("diary"))
     router.message.register(cmd_secret, Command("secret"))
     router.message.register(cmd_settings, Command("settings"))
     return router

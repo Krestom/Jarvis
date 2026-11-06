@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date, timedelta
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from jarvis.bot.callbacks import (
     ConfirmCB,
+    DiaryCB,
     DocCB,
     DocListCB,
     ImpCB,
@@ -32,6 +34,9 @@ def main_menu() -> InlineKeyboardMarkup:
     builder.add(InlineKeyboardButton(text="🔎 Поиск", callback_data=MenuCB(action="search").pack()))
     builder.add(InlineKeyboardButton(text="✅ Задачи", callback_data=MenuCB(action="tasks").pack()))
     builder.add(
+        InlineKeyboardButton(text="📔 Дневник", callback_data=MenuCB(action="diary").pack())
+    )
+    builder.add(
         InlineKeyboardButton(text="📚 Знания", callback_data=MenuCB(action="knowledge").pack())
     )
     builder.add(
@@ -43,7 +48,7 @@ def main_menu() -> InlineKeyboardMarkup:
     builder.add(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data=MenuCB(action="settings").pack())
     )
-    builder.adjust(2, 2, 2)
+    builder.adjust(2, 2, 2, 1)
     return builder.as_markup()
 
 
@@ -54,6 +59,7 @@ UI_ACTION_BUTTONS: dict[str, tuple[str, str]] = {
     "tasks_today": ("🔸 Задачи на сегодня", TaskListCB(view="today").pack()),
     "tasks_week": ("📆 Задачи на неделе", TaskListCB(view="week").pack()),
     "tasks_inbox": ("🌀 Inbox", TaskListCB(view="inbox").pack()),
+    "diary": ("📔 Дневник", MenuCB(action="diary").pack()),
     "documents": ("📄 Документы", MenuCB(action="documents").pack()),
     "projects": ("🗂 Проекты", MenuCB(action="projects").pack()),
     "settings": ("⚙️ Настройки", MenuCB(action="settings").pack()),
@@ -173,7 +179,9 @@ def task_list_keyboard(
         builder.add(
             InlineKeyboardButton(
                 text=f"{index}. {task.title[:24]}",
-                callback_data=TaskCB(action="view", task_id=uuid_hex(task.id)).pack(),
+                callback_data=TaskCB(
+                    action="view", task_id=uuid_hex(task.id), value="l"
+                ).pack(),
             )
         )
     nav = []
@@ -216,7 +224,112 @@ def reminder_keyboard(task_id: str) -> InlineKeyboardMarkup:
     )
 
 
-def task_card_keyboard(task_id: str, status: str, comments_count: int = 0) -> InlineKeyboardMarkup:
+def diary_reminder_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✍️ Сделать запись",
+                    callback_data=DiaryCB(action="write").pack(),
+                    style="primary",
+                ),
+                InlineKeyboardButton(
+                    text="⏰ Перенести",
+                    callback_data=DiaryCB(action="snooze").pack(),
+                ),
+            ]
+        ]
+    )
+
+
+def diary_day_keyboard(
+    entries, day: str, is_today: bool, today: str
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for index, entry in enumerate(entries, start=1):
+        builder.row(
+            InlineKeyboardButton(
+                text=f"✏️ {index}",
+                callback_data=DiaryCB(
+                    action="edit", entry_id=uuid_hex(entry.id), day=day
+                ).pack(),
+            ),
+            InlineKeyboardButton(
+                text=f"🗑 {index}",
+                callback_data=DiaryCB(
+                    action="delete", entry_id=uuid_hex(entry.id), day=day
+                ).pack(),
+                style="danger",
+            ),
+        )
+    current = date.fromisoformat(day)
+    nav = [
+        InlineKeyboardButton(
+            text="⬅️",
+            callback_data=DiaryCB(
+                action="day", day=(current - timedelta(days=1)).isoformat()
+            ).pack(),
+        )
+    ]
+    if not is_today:
+        nav.append(
+            InlineKeyboardButton(
+                text="➡️",
+                callback_data=DiaryCB(
+                    action="day", day=(current + timedelta(days=1)).isoformat()
+                ).pack(),
+            )
+        )
+    builder.row(*nav)
+    extra = []
+    if is_today:
+        extra.append(
+            InlineKeyboardButton(
+                text="➕ Сделать запись",
+                callback_data=DiaryCB(action="write", day=day).pack(),
+                style="primary",
+            )
+        )
+    else:
+        extra.append(
+            InlineKeyboardButton(
+                text="Сегодня", callback_data=DiaryCB(action="day", day=today).pack()
+            )
+        )
+    extra.append(
+        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
+    )
+    builder.row(*extra)
+    return builder.as_markup()
+
+
+def diary_delete_keyboard(entry_id: str, day: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🗑 Да, удалить",
+                    callback_data=DiaryCB(
+                        action="delete_yes", entry_id=entry_id, day=day
+                    ).pack(),
+                    style="danger",
+                ),
+                InlineKeyboardButton(
+                    text="⬅️ Отмена",
+                    callback_data=DiaryCB(action="cancel", entry_id=entry_id, day=day).pack(),
+                ),
+            ]
+        ]
+    )
+
+
+def task_card_keyboard(
+    task_id: str,
+    status: str,
+    comments_count: int = 0,
+    *,
+    from_list: bool = False,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if status == "done":
         builder.add(
@@ -259,7 +372,14 @@ def task_card_keyboard(task_id: str, status: str, comments_count: int = 0) -> In
         )
     )
     builder.row(
-        InlineKeyboardButton(text="📋 К спискам", callback_data=MenuCB(action="tasks").pack())
+        InlineKeyboardButton(
+            text="⬅️ Назад" if from_list else "📋 К спискам",
+            callback_data=(
+                TaskCB(action="back").pack()
+                if from_list
+                else MenuCB(action="tasks").pack()
+            ),
+        )
     )
     builder.adjust(2, 2, 1, 1)
     return builder.as_markup()

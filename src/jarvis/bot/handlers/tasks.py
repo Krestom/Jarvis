@@ -24,7 +24,9 @@ from jarvis.bot.keyboards import (
     main_menu,
     task_categories_keyboard,
     task_list_keyboard,
+    tasks_menu_keyboard,
 )
+from jarvis.bot.ui_state import last_task_list, remember_task_list
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
@@ -88,6 +90,7 @@ async def send_task_list(
     message: Message, session: AsyncSession, settings: Settings, *, view: str, page: int
 ) -> None:
     text, markup = await build_task_list(session, settings, view, page)
+    remember_task_list(message.chat.id, view, page)
     await send_or_edit(message, f"{text}\n\nВыберите задачу:", markup=markup)
 
 
@@ -107,6 +110,12 @@ async def task_list(
     text, markup = await build_task_list(
         session, settings, callback_data.view, callback_data.page, callback_data.value
     )
+    remember_task_list(
+        callback.message.chat.id,
+        callback_data.view,
+        callback_data.page,
+        callback_data.value,
+    )
     await callback.answer()
     await send_or_edit(
         callback.message, f"{text}\n\nВыберите задачу:", markup=markup, edit=True
@@ -123,6 +132,25 @@ async def task_action(
     user_id = callback.from_user.id
     action = callback_data.action
     task_id = parse_hex_uuid(callback_data.task_id)
+
+    if action == "back":
+        await callback.answer()
+        target = last_task_list(callback.message.chat.id)
+        if target is None:
+            await send_or_edit(
+                callback.message,
+                "📋 <b>Задачи</b>\nВыберите список:",
+                markup=tasks_menu_keyboard(),
+                edit=True,
+            )
+            return
+        text, markup = await build_task_list(
+            session, settings, target.view, target.page, target.value
+        )
+        await send_or_edit(
+            callback.message, f"{text}\n\nВыберите задачу:", markup=markup, edit=True
+        )
+        return
 
     if action == "cedit":
         # Изменение комментария: id задачи восстанавливаем из самого комментария
@@ -149,7 +177,9 @@ async def task_action(
         if task_id is None:
             await callback.answer("Некорректная задача", show_alert=True)
             return
-        text, markup = await render_task_card(session, settings, task_id)
+        text, markup = await render_task_card(
+            session, settings, task_id, from_list=callback_data.value == "l"
+        )
         await callback.answer()
         if text is None:
             await callback.message.answer("Задача не найдена.", reply_markup=main_menu())

@@ -108,7 +108,7 @@ someday/no_group/inbox/all/done, либо on_date, либо category), `search`
 
 | Место UI | Кнопки | Чем закрывает агент |
 |---|---|---|
-| Главное меню | 🔎 Поиск, ✅ Задачи, 📚 Знания, 📄 Документы, 🗂 Проекты, ⚙️ Настройки | экраны `search`/`tasks`/`knowledge`/`documents`, `list_projects`+`create_project`, `create_category`+`rename_category` |
+| Главное меню | 🔎 Поиск, ✅ Задачи, 📔 Дневник, 📚 Знания, 📄 Документы, 🗂 Проекты, ⚙️ Настройки | экраны `search`/`tasks`/`knowledge`/`documents`, `list_projects`+`create_project`, `create_category`+`rename_category`; дневник агенту недоступен (личное, только в боте) |
 | Меню «Задачи» | Сегодня, На этой неделе, В этом месяце, Все задачи, Без срока, Выполненные, По категориям | экран `tasks` (`view`, `category`); `on_date` — для «задачи на 19 октября» |
 | Карточка задачи | изменить срок, группа, завершить/вернуть, комментарии (список/добавить/править), удалить, к спискам | `update_task` (срок/группа/статус/проект), экран `card`, `list_comments`+`add_comment`+`update_comment`, `delete_task` |
 | Знания | список, карточка, полный текст, похожие, удалить | экран `knowledge`, экран `card`, `get_knowledge`, `search_all`, `delete_knowledge` |
@@ -118,6 +118,7 @@ someday/no_group/inbox/all/done, либо on_date, либо category), `search`
 | Диагностика | backlog, статусы, экспорт, удаление записи | `list_improvements`, `update_improvement`, `export_issues`; экран открывается quick action «🩺 Диагностика». Удаление записей — только в `/diagnostics` (необратимо) |
 | Экспорты | `/export_chat`, `/export_issues` | `export_chat`, `export_issues` |
 | Секреты | все | исключены владельцем (значения не должны проходить через LLM) |
+| Дневник | экран дня, запись, правка, удаление | только в боте; агенту, поиску и MCP недоступен (личные записи) |
 
 Ошибки различаются по видам: `validation`, `not_found`, `unsupported`,
 `transient` (единственный вид, который повторяется — до

@@ -21,3 +21,5 @@ class Flow(StrEnum):
     CHOOSE_DOC_CATEGORY = "choose_doc_category"
     FORCE_SAVE_PENDING = "force_save_pending"
     AWAIT_TASK_DUE = "await_task_due"
+    DIARY_WAIT = "diary_wait"
+    DIARY_EDIT_WAIT = "diary_edit_wait"

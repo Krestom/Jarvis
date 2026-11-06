@@ -53,6 +53,7 @@ def test_settings(tmp_path: Path) -> Settings:
         secrets_encryption_key=TEST_SECRETS_KEY_B64,
         document_storage_path=tmp_path / "documents",
         database_url="postgresql+asyncpg://unused:unused@127.0.0.1:1/unused",
+        diary_enabled=False,
     )
 
 

@@ -231,6 +231,94 @@ async def test_reminder_complete_button_closes_task(
     assert "завершена" in (harness.current(reminder).text or "").lower()
 
 
+async def test_diary_create_multiple_edit_and_delete(
+    classic_settings, session_factory, session
+):
+    from jarvis.repositories.diary import DiaryRepository
+
+    harness = await make_harness(classic_settings, session_factory)
+    messages = await harness.send_text(DEFAULT_USER_ID, "/diary")
+    screen = keyboard_messages(messages)[-1]
+    assert "Дневник" in (screen.text or "")
+
+    await harness.click_button(DEFAULT_USER_ID, screen, "Сделать запись")
+    saved = await harness.send_text(DEFAULT_USER_ID, "Первая мысль")
+    quick = keyboard_messages(saved)[-1]
+    await harness.click_button(DEFAULT_USER_ID, quick, "Дневник")
+    diary_message = harness.current(quick)
+    assert "Первая мысль" in (diary_message.text or "")
+
+    # Вторая запись за тот же день.
+    await harness.click_button(DEFAULT_USER_ID, diary_message, "Сделать запись")
+    saved2 = await harness.send_text(DEFAULT_USER_ID, "Вторая мысль")
+    quick2 = keyboard_messages(saved2)[-1]
+    await harness.click_button(DEFAULT_USER_ID, quick2, "Дневник")
+    diary_message = harness.current(quick2)
+    assert "Первая мысль" in (diary_message.text or "")
+    assert "Вторая мысль" in (diary_message.text or "")
+
+    today = datetime.now(UTC).astimezone(classic_settings.tz).date()
+    repo = DiaryRepository(session)
+    entries = await repo.list_day(DEFAULT_USER_ID, today)
+    assert [entry.content for entry in entries] == ["Первая мысль", "Вторая мысль"]
+
+    # Правка первой записи: меняется только текст, время остаётся.
+    first_created = entries[0].created_at
+    await harness.click_button(DEFAULT_USER_ID, diary_message, "✏️")
+    saved3 = await harness.send_text(DEFAULT_USER_ID, "Исправленная мысль")
+    quick3 = keyboard_messages(saved3)[-1]
+    await harness.click_button(DEFAULT_USER_ID, quick3, "Дневник")
+    diary_message = harness.current(quick3)
+    session.expire_all()
+    entries = await repo.list_day(DEFAULT_USER_ID, today)
+    assert [entry.content for entry in entries] == [
+        "Исправленная мысль",
+        "Вторая мысль",
+    ]
+    assert entries[0].created_at == first_created
+
+    # Удаление второй записи через подтверждение.
+    await harness.click_button(DEFAULT_USER_ID, diary_message, "🗑 2")
+    confirm = harness.current(diary_message)
+    await harness.click_button(DEFAULT_USER_ID, confirm, "Да, удалить")
+    assert "Вторая мысль" not in (harness.current(confirm).text or "")
+    session.expire_all()
+    entries = await repo.list_day(DEFAULT_USER_ID, today)
+    assert [entry.content for entry in entries] == ["Исправленная мысль"]
+
+
+async def test_task_card_back_returns_to_same_list(
+    classic_settings, session_factory, session
+):
+    service = TaskService(session)
+    for index in range(1, 9):
+        await service.create_from_draft(TaskDraft(title=f"Назад {index}"))
+    await session.commit()
+
+    harness = await make_harness(classic_settings, session_factory)
+    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    menu = keyboard_messages(messages)[-1]
+    await harness.click_button(DEFAULT_USER_ID, menu, "Все задачи")
+    page1 = harness.current(menu)
+    assert "Все задачи" in (page1.text or "")
+
+    await harness.click_button(DEFAULT_USER_ID, page1, "➡️")
+    page2 = harness.current(menu)
+    await harness.click_button(DEFAULT_USER_ID, page2, "Назад 8")
+    card = harness.current(menu)
+    labels = [
+        button.text
+        for row in card.reply_markup.inline_keyboard
+        for button in row
+    ]
+    assert "⬅️ Назад" in labels
+
+    await harness.click_button(DEFAULT_USER_ID, card, "Назад")
+    back = harness.current(menu)
+    assert "Все задачи" in (back.text or "")
+    assert "Назад 8" in (back.text or "")
+
+
 # 2b. Ошибка/лимит транскрибации показывается прямо в чате.
 async def test_scenario_voice_transcription_error_shown(
     classic_settings, session_factory, session

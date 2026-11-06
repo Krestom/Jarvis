@@ -7,13 +7,14 @@ Enum'ы хранятся как VARCHAR без CHECK-ограничений: з�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum as PyEnum
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Computed,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -490,3 +491,44 @@ class NotificationLog(Base):
     )
 
     __table_args__ = (UniqueConstraint("kind", "ref", name="uq_notification_kind_ref"),)
+
+
+class DiaryEntry(Base, TimestampMixin):
+    """Личная запись дневника: несколько записей за один день."""
+
+    __tablename__ = "diary_entries"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_diary_entries_user_date",
+            "telegram_user_id",
+            "entry_date",
+            "created_at",
+        ),
+    )
+
+
+class DiarySnooze(Base):
+    """Запрошенный перенос напоминания о дневнике (одноразовый)."""
+
+    __tablename__ = "diary_snoozes"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    remind_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_diary_snoozes_user_due",
+            "telegram_user_id",
+            "sent_at",
+            "remind_at",
+        ),
+    )

@@ -28,7 +28,13 @@ def parse_hex_uuid(value: str) -> uuid.UUID | None:
         return None
 
 
-async def render_task_card(session: AsyncSession, settings: Settings, task_id: uuid.UUID):
+async def render_task_card(
+    session: AsyncSession,
+    settings: Settings,
+    task_id: uuid.UUID,
+    *,
+    from_list: bool = False,
+):
     from jarvis.repositories.comments import TaskCommentRepository
 
     task = await TaskRepository(session).get(task_id)
@@ -56,7 +62,9 @@ async def render_task_card(session: AsyncSession, settings: Settings, task_id: u
         if len(comments) > 3:
             text += f"\n<i>…и ещё {len(comments) - 3}</i>"
 
-    markup = task_card_keyboard(uuid_hex(task.id), task.status.value, len(comments))
+    markup = task_card_keyboard(
+        uuid_hex(task.id), task.status.value, len(comments), from_list=from_list
+    )
     return text, markup
 
 
