@@ -42,7 +42,6 @@ class FakeTelegramSession(BaseSession):
         self.requests: list[TelegramMethod] = []
         self.sent_messages: list[Message] = []
         self.download_payload: bytes = b"fake-binary-payload"
-        self.recorder = None  # колбэк журнала чата (см. bot/chatlog.py)
         self.tracker = MessageTracker()
         self._message_id = 1000
 
@@ -68,8 +67,6 @@ class FakeTelegramSession(BaseSession):
             )
             self.sent_messages.append(message)
             self.tracker.note(int(method.chat_id), message.message_id)
-            if self.recorder is not None and method.text:
-                await self.recorder(int(method.chat_id), method.text)
             return message
         if name == "SendDocument":
             self._message_id += 1

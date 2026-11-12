@@ -540,5 +540,6 @@ healthy, бот поллит.**
 
 - Архитектура — `docs/architecture.md`; агент — `docs/agent.md`;
   диагностика/экспорты/уведомления — `docs/diagnostics.md`; деплой — `docs/deployment.md`;
-  безопасность — `docs/security.md`; цикл backlog для OpenCode — `AGENTS.md`;
+  безопасность — `docs/security.md`; HTML-виджеты Telegram (Bot API 10.4) —
+  `docs/telegram-widgets.md`; цикл backlog для OpenCode — `AGENTS.md`;
   журнал Stage 2 — `docs/stage-2-audit.md`.

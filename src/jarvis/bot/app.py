@@ -14,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis.agent.queue import UserSessionGate
 from jarvis.ai import AIProvider
-from jarvis.bot.chatlog import RecordingAiohttpSession
 from jarvis.bot.handlers import build_routers
 from jarvis.bot.middlewares import register_middlewares
+from jarvis.bot.telegram_session import TrackingAiohttpSession
 from jarvis.config.settings import Settings
 from jarvis.db.session import session_scope
 from jarvis.logging_setup import get_correlation_id
@@ -31,21 +31,17 @@ BOT_COMMANDS = [
     BotCommand(command="search", description="Поиск по базе"),
     BotCommand(command="tasks", description="Задачи"),
     BotCommand(command="today", description="Задачи на сегодня"),
-    BotCommand(command="inbox", description="Неразобранное"),
     BotCommand(command="documents", description="Документы"),
-    BotCommand(command="diary", description="Дневник"),
     BotCommand(command="secret", description="Секреты"),
-    BotCommand(command="settings", description="Настройки"),
     BotCommand(command="diagnostics", description="Диагностика и backlog"),
     BotCommand(command="export_issues", description="Экспорт заявок (MD/JSON)"),
-    BotCommand(command="export_chat", description="Экспорт чата за день (MD/JSON)"),
     BotCommand(command="help", description="Справка"),
     BotCommand(command="cancel", description="Отменить текущий сценарий"),
 ]
 
 
 def create_bot(settings: Settings) -> Bot:
-    session = RecordingAiohttpSession(proxy=settings.bot_proxy or None)
+    session = TrackingAiohttpSession(proxy=settings.bot_proxy or None)
     return Bot(
         token=settings.bot_token,
         session=session,

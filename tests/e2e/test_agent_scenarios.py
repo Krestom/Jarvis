@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -12,7 +12,7 @@ from jarvis.ai.fake import FakeProvider
 from jarvis.ai.schemas import Interpretation, PlanStep, ScreenRequest
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
-from jarvis.domain.enums import KnowledgeSource, KnowledgeType, TaskBucket
+from jarvis.domain.enums import KnowledgeSource, KnowledgeType
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
@@ -356,7 +356,7 @@ async def test_plain_text_handled_by_agent_without_invocation(
 
 async def test_agent_opens_tasks_screen(test_settings, session_factory, session):
     await TaskService(session).create_from_draft(
-        TaskDraft(title="Починить сервер", bucket=TaskBucket.WEEK)
+        TaskDraft(title="Починить сервер", due_at=datetime.now(UTC) + timedelta(days=2))
     )
     await session.commit()
     ai = FakeProvider()
@@ -404,10 +404,10 @@ async def test_agent_opens_search_screen(test_settings, session_factory, session
 
 async def test_agent_opens_all_tasks_screen(test_settings, session_factory, session):
     await TaskService(session).create_from_draft(
-        TaskDraft(title="Починить сервер", bucket=TaskBucket.WEEK)
+        TaskDraft(title="Починить сервер", due_at=datetime.now(UTC) + timedelta(days=2))
     )
     await TaskService(session).create_from_draft(
-        TaskDraft(title="Разобрать полку", bucket=None)
+        TaskDraft(title="Разобрать полку")
     )
     await session.commit()
     ai = FakeProvider()
@@ -426,22 +426,6 @@ async def test_agent_opens_all_tasks_screen(test_settings, session_factory, sess
     assert "Починить сервер" in combined
     assert "Разобрать полку" in combined
     assert keyboard_messages(messages)  # кликабельные карточки
-
-
-async def test_agent_exports_chat_as_files(test_settings, session_factory, session):
-    ai = FakeProvider()
-    ai.queue_plan(PlanStep(type="tool_call", tool="export_chat", args={}))
-    ai.queue_plan(PlanStep(type="reply", text="Готово: журнал за сегодня во вложениях."))
-    harness = await make_harness(test_settings, session_factory, ai=ai)
-
-    messages = await harness.send_text(DEFAULT_USER_ID, "экспортируй чат за сегодня")
-    combined = " ".join(m.text or "" for m in messages)
-    assert "Готово" in combined
-    sent = [m for m in messages if m.document is not None]
-    assert len(sent) == 2
-    names = sorted(m.document.file_name for m in sent)
-    assert names[0].startswith("jarvis_chat_") and names[0].endswith(".json")
-    assert names[1].startswith("jarvis_chat_") and names[1].endswith(".md")
 
 
 async def test_agent_sends_found_document_as_file(test_settings, session_factory, session):
@@ -773,48 +757,6 @@ async def test_agent_quick_actions_keyboard_from_reply(    test_settings, sessio
     assert "AI-агент (последний запрос): completed" in combined
 
 
-# 20. /export_chat: журнал диалога за день уходит файлами (MD + JSON).
-async def test_scenario_chat_export(test_settings, session_factory, session, tmp_path):
-    test_settings.export_dir = tmp_path / "exports"
-    harness = await make_harness(test_settings, session_factory)
-
-    await harness.send_text(DEFAULT_USER_ID, "/start")
-
-    export_messages = await harness.send_text(DEFAULT_USER_ID, "/export_chat")
-    assert any("Чат за" in (m.text or "") for m in export_messages)
-    documents = [m for m in export_messages if m.document is not None]
-    assert len(documents) == 2
-
-    files = sorted((tmp_path / "exports").glob("jarvis_chat_*"))
-    assert [file.suffix for file in files] == [".json", ".md"]
-    markdown = next(file for file in files if file.suffix == ".md").read_text(
-        encoding="utf-8"
-    )
-    # Записаны обе стороны: команда пользователя и ответ бота.
-    assert "Пользователь (команда):" in markdown
-    assert "/start" in markdown
-    assert "Jarvis:" in markdown
-
-    json_file = next(file for file in files if file.suffix == ".json")
-    payload = json.loads(json_file.read_text(encoding="utf-8"))
-    assert payload["count"] >= 2
-    assert {message["direction"] for message in payload["messages"]} == {"in", "out"}
-
-
-async def test_export_chat_reports_unwritable_directory(
-    test_settings, session_factory, session, tmp_path
-):
-    """Если каталог выгрузок недоступен — бот честно отвечает, а не молчит."""
-    blocker = tmp_path / "blocker"
-    blocker.write_text("это файл, а не каталог", encoding="utf-8")
-    test_settings.export_dir = blocker / "exports"  # mkdir упадёт: родитель — файл
-    harness = await make_harness(test_settings, session_factory)
-
-    messages = await harness.send_text(DEFAULT_USER_ID, "/export_chat")
-    combined = " ".join(m.text or "" for m in messages)
-    assert "Не удалось сохранить файлы экспорта" in combined
-
-
 class _BlockingPlanner(FakeProvider):
     """Планировщик, зависающий до разрешения — для проверки /cancel."""
 
@@ -830,6 +772,7 @@ class _BlockingPlanner(FakeProvider):
         return PlanStep(type="reply", text="Поздний ответ")
 
 
+# 20. Отмена текущего агентского запроса.
 async def test_cancel_command_stops_running_agent(
     test_settings, session_factory, session
 ):
@@ -862,7 +805,7 @@ async def test_stale_search_state_does_not_trap_messages(
     store = ConversationStore(ConversationRepository(session), test_settings)
     await store.set(DEFAULT_USER_ID, Flow.SEARCH_WAIT, data={"query": "джарвис", "page": 0})
     await TaskService(session).create_from_draft(
-        TaskDraft(title="Обновить дашборд", bucket=TaskBucket.WEEK)
+        TaskDraft(title="Обновить дашборд", due_at=datetime.now(UTC) + timedelta(days=2))
     )
     await session.commit()
 
@@ -886,7 +829,7 @@ async def test_search_flow_releases_after_results(test_settings, session_factory
         source_type=KnowledgeSource.TEXT,
     )
     await TaskService(session).create_from_draft(
-        TaskDraft(title="Починить сервер", bucket=TaskBucket.WEEK)
+        TaskDraft(title="Починить сервер", due_at=datetime.now(UTC) + timedelta(days=2))
     )
     await session.commit()
 
@@ -956,7 +899,7 @@ async def test_agent_shows_backlog_on_request(test_settings, session_factory, se
 async def test_agent_saves_credentials_through_confirmation(
     test_settings, session_factory, session
 ):
-    """Креды через агента: pending-операция → кнопка → запись sensitive в проект."""
+    """Креды через агента: pending-операция → кнопка → запись sensitive."""
     ai = FakeProvider()
     ai.queue_plan(
         PlanStep(
@@ -965,7 +908,6 @@ async def test_agent_saves_credentials_through_confirmation(
             args={
                 "title": "Доступ к серверу Supersport",
                 "content": "ssh 2.28.205.186, user deploy, пароль supersport",
-                "project": "Supersport",
             },
         )
     )
@@ -976,7 +918,7 @@ async def test_agent_saves_credentials_through_confirmation(
 
     messages = await harness.send_text(
         DEFAULT_USER_ID,
-        "Джарвис, сохрани в проект Supersport креды для доступа по ssh: "
+        "Джарвис, сохрани креды для доступа по ssh: "
         "2.28.205.186, user deploy, пароль supersport",
     )
     assert any("Нажмите «Подтвердить»" in (m.text or "") for m in messages)
@@ -990,4 +932,3 @@ async def test_agent_saves_credentials_through_confirmation(
     assert len(items) == 1
     assert items[0].title == "Доступ к серверу Supersport"
     assert items[0].sensitivity.value == "sensitive"
-    assert items[0].project_id is not None

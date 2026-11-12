@@ -13,7 +13,6 @@ from jarvis.config.settings import Settings
 from jarvis.conversation.state import ConversationStore
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 
 
@@ -31,9 +30,6 @@ async def _load_candidate_title(session: AsyncSession, kind: str, raw_id: str) -
     if kind == "knowledge":
         item = await KnowledgeRepository(session).get(entity_id)
         return item.title if item is not None else None
-    if kind == "project":
-        project = await ProjectRepository(session).get(entity_id)
-        return project.name if project is not None else None
     return None
 
 
@@ -73,7 +69,7 @@ async def agent_pick(
     await store.set(user_id, AGENT_FLOW, data=data)
     await callback.answer("Выбрано")
 
-    label = {"task": "задачу", "knowledge": "запись", "project": "проект"}.get(kind, "запись")
+    label = {"task": "задачу", "knowledge": "запись"}.get(kind, "запись")
     text = f"✅ Выбрал {label}: <b>{esc(fresh_title)}</b>"
     if stale_message.get():
         await callback.message.answer(text)

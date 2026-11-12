@@ -1,9 +1,8 @@
 # MCP: read-only доступ из OpenCode
 
 Jarvis предоставляет отдельный MCP-сервер (`src/jarvis/mcp/`), через который
-coding-агент (OpenCode) может **только читать** разрешённые знания, инструкции,
-задачи и контекст проектов. Это вторая после Telegram точка доступа, и она
-сознательно ограничена.
+coding-агент (OpenCode) может **только читать** разрешённые знания, инструкции
+и задачи. Это вторая после Telegram точка доступа, и она сознательно ограничена.
 
 Реализация — официальный Python SDK `mcp` (v2, streamable HTTP) плюс
 собственная bearer-аутентификация. Транспорт — Streamable HTTP; stdio-режим
@@ -16,8 +15,7 @@ coding-агент (OpenCode) может **только читать** разре
 | `search_knowledge(query, limit)` | Поиск по записям знаний: id, тип, заголовок, фрагмент |
 | `search_instructions(query, limit)` | Поиск только по инструкциям |
 | `get_knowledge_item(item_id)` | Полный текст записи по id (если разрешена политикой) |
-| `get_project_context(project_name, limit)` | Описание проекта + связанные знания и задачи |
-| `search_tasks(query, view, limit)` | Задачи по тексту и/или динамическому списку (`today`, `week`, `long_term`, `someday`, `no_group`, `inbox`, `done`) |
+| `search_tasks(query, view, limit)` | Задачи по тексту и/или календарному списку (`today`, `week`, `no_group`, `all`) |
 
 Связи сущностей (`find_related`) удалены вместе с фичей «Связи»: создать связь
 было неоткуда, и таблица всегда была пустой.

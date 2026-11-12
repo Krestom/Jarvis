@@ -7,14 +7,13 @@ Enum'ы хранятся как VARCHAR без CHECK-ограничений: з�
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from enum import Enum as PyEnum
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Computed,
-    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -43,10 +42,8 @@ from jarvis.domain.enums import (
     KnowledgeType,
     PendingOpType,
     PendingStatus,
-    ProjectStatus,
     SecretType,
     Sensitivity,
-    TaskBucket,
     TaskPriority,
     TaskStatus,
 )
@@ -71,39 +68,6 @@ def _uuid_pk() -> Mapped[uuid.UUID]:
 _ALL_ENTITY_TYPES = [member.value for member in EntityType]
 
 
-# --- Категории и проекты -----------------------------------------------------
-
-
-class Category(Base, TimestampMixin, SoftDeleteMixin):
-    __tablename__ = "categories"
-
-    id: Mapped[uuid.UUID] = _uuid_pk()
-    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
-    parent_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
-    )
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
-    __table_args__ = (Index("ix_categories_parent", "parent_id"),)
-
-
-class Project(Base, TimestampMixin, SoftDeleteMixin):
-    __tablename__ = "projects"
-
-    id: Mapped[uuid.UUID] = _uuid_pk()
-    name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[ProjectStatus] = mapped_column(
-        _enum(ProjectStatus, "project_status"), nullable=False, default=ProjectStatus.ACTIVE
-    )
-    category_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
-    )
-    meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-
-    __table_args__ = (Index("ix_projects_category", "category_id"),)
-
-
 # --- Знания ------------------------------------------------------------------
 
 
@@ -123,12 +87,6 @@ class KnowledgeItem(Base, TimestampMixin, SoftDeleteMixin):
         default=KnowledgeSource.MANUAL,
     )
     original_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
-    )
-    project_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
-    )
     sensitivity: Mapped[Sensitivity] = mapped_column(
         _enum(Sensitivity, "sensitivity"), nullable=False, default=Sensitivity.NORMAL
     )
@@ -150,8 +108,6 @@ class KnowledgeItem(Base, TimestampMixin, SoftDeleteMixin):
 
     __table_args__ = (
         Index("ix_knowledge_fts", "search_vector", postgresql_using="gin"),
-        Index("ix_knowledge_category", "category_id"),
-        Index("ix_knowledge_project", "project_id"),
         Index("ix_knowledge_type_status", "type", "status"),
     )
 
@@ -169,19 +125,7 @@ class Task(Base, TimestampMixin, SoftDeleteMixin):
     status: Mapped[TaskStatus] = mapped_column(
         _enum(TaskStatus, "task_status"), nullable=False, default=TaskStatus.TODO
     )
-    priority: Mapped[TaskPriority] = mapped_column(
-        _enum(TaskPriority, "task_priority"), nullable=False, default=TaskPriority.NORMAL
-    )
-    bucket: Mapped[TaskBucket | None] = mapped_column(
-        _enum(TaskBucket, "task_bucket"), nullable=True
-    )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    category_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
-    )
-    project_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
-    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     search_vector: Mapped[str | None] = mapped_column(
@@ -196,10 +140,8 @@ class Task(Base, TimestampMixin, SoftDeleteMixin):
 
     __table_args__ = (
         Index("ix_tasks_fts", "search_vector", postgresql_using="gin"),
-        Index("ix_tasks_status_bucket", "status", "bucket"),
+        Index("ix_tasks_status", "status"),
         Index("ix_tasks_due_at", "due_at"),
-        Index("ix_tasks_category", "category_id"),
-        Index("ix_tasks_project", "project_id"),
     )
 
 
@@ -216,12 +158,6 @@ class Document(Base, TimestampMixin, SoftDeleteMixin):
     document_type: Mapped[DocumentType] = mapped_column(
         _enum(DocumentType, "document_type"), nullable=False, default=DocumentType.OTHER
     )
-    category_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
-    )
-    project_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
-    )
     sensitivity: Mapped[Sensitivity] = mapped_column(
         _enum(Sensitivity, "sensitivity"), nullable=False, default=Sensitivity.SENSITIVE
     )
@@ -237,8 +173,6 @@ class Document(Base, TimestampMixin, SoftDeleteMixin):
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
     __table_args__ = (
-        Index("ix_documents_category", "category_id"),
-        Index("ix_documents_project", "project_id"),
         Index("ix_documents_status", "status"),
     )
 
@@ -259,12 +193,6 @@ class Secret(Base, TimestampMixin, SoftDeleteMixin):
     )
     encrypted_value: Mapped[bytes] = mapped_column(nullable=False)
     key_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    project_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
-    )
-    category_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
-    )
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
@@ -447,34 +375,6 @@ class ImprovementEvent(Base):
     __table_args__ = (Index("ix_improvement_events_item", "item_id", "occurred_at"),)
 
 
-# --- Журнал чата (экспорт диалога) -------------------------------------------
-
-
-class ChatMessage(Base):
-    """Сообщение диалога (входящее/исходящее) для дневного экспорта.
-
-    Текст сохраняется уже redacted (секреты вырезаны при записи); журнал
-    выключается CHAT_LOG_ENABLED=false и чистится по retention.
-    """
-
-    __tablename__ = "chat_messages"
-
-    id: Mapped[uuid.UUID] = _uuid_pk()
-    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    direction: Mapped[str] = mapped_column(String(8), nullable=False)  # in | out
-    source: Mapped[str] = mapped_column(String(16), nullable=False, default="text")
-    text: Mapped[str] = mapped_column(Text, nullable=False)
-    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-
-    __table_args__ = (
-        Index("ix_chat_messages_user_time", "telegram_user_id", "created_at"),
-        Index("ix_chat_messages_created", "created_at"),
-    )
-
-
 # --- Журнал уведомлений (напоминания и сводки) -------------------------------
 
 
@@ -491,44 +391,3 @@ class NotificationLog(Base):
     )
 
     __table_args__ = (UniqueConstraint("kind", "ref", name="uq_notification_kind_ref"),)
-
-
-class DiaryEntry(Base, TimestampMixin):
-    """Личная запись дневника: несколько записей за один день."""
-
-    __tablename__ = "diary_entries"
-
-    id: Mapped[uuid.UUID] = _uuid_pk()
-    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-
-    __table_args__ = (
-        Index(
-            "ix_diary_entries_user_date",
-            "telegram_user_id",
-            "entry_date",
-            "created_at",
-        ),
-    )
-
-
-class DiarySnooze(Base):
-    """Запрошенный перенос напоминания о дневнике (одноразовый)."""
-
-    __tablename__ = "diary_snoozes"
-
-    id: Mapped[uuid.UUID] = _uuid_pk()
-    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
-    remind_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    __table_args__ = (
-        Index(
-            "ix_diary_snoozes_user_due",
-            "telegram_user_id",
-            "sent_at",
-            "remind_at",
-        ),
-    )

@@ -21,9 +21,7 @@ from jarvis.config.settings import Settings
 from jarvis.db.session import session_scope
 from jarvis.domain.enums import KnowledgeType, Sensitivity
 from jarvis.repositories.audit import AuditRepository
-from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.knowledge import allowed_sensitivities
 from jarvis.services.tasks import TASK_VIEWS, TaskService
@@ -63,19 +61,13 @@ class _Serializer:
     def __init__(self, session: AsyncSession, allowed: list[Sensitivity]) -> None:
         self._session = session
         self._allowed = allowed
-        self._categories = CategoryRepository(session)
 
     async def knowledge(self, item, *, include_content: bool = False) -> dict[str, Any]:
-        category = None
-        if item.category_id:
-            found = await self._categories.get(item.category_id)
-            category = found.name if found else None
         data: dict[str, Any] = {
             "id": str(item.id),
             "type": item.type.value if hasattr(item.type, "value") else str(item.type),
             "title": item.title,
             "summary": item.summary,
-            "category": category,
             "sensitivity": item.sensitivity.value,
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         }
@@ -91,8 +83,6 @@ class _Serializer:
             "title": task.title,
             "description": _snippet(task.description),
             "status": task.status.value,
-            "bucket": task.bucket.value if task.bucket else None,
-            "priority": task.priority.value,
             "due_at": task.due_at.isoformat() if task.due_at else None,
             "updated_at": task.updated_at.isoformat() if task.updated_at else None,
         }
@@ -169,46 +159,10 @@ def register_tools(
             return result
 
     @server.tool(
-        name="get_project_context",
-        title="Контекст проекта",
-        description=(
-            "Получить описание проекта и последние связанные записи знаний — "
-            "контекст, нужный для работы над проектом."
-        ),
-    )
-    async def get_project_context(project_name: str, limit: int = 20) -> dict[str, Any]:
-        """Проект + свежие знания и задачи, привязанные к нему."""
-        limit = max(1, min(int(limit), 50))
-        async with session_scope(session_factory) as session:
-            projects = ProjectRepository(session)
-            project = await projects.find_by_name(project_name)
-            if project is None:
-                names = [p.name for p in await projects.list_active(limit=50)]
-                return {"error": "not_found", "available_projects": names}
-            knowledge = await KnowledgeRepository(session).list_for_project(
-                project.id, allowed_sensitivities=allowed, limit=limit
-            )
-            tasks = await TaskRepository(session).list_for_project(project.id, limit=limit)
-            serializer = _Serializer(session, allowed)
-            result = {
-                "project": {
-                    "id": str(project.id),
-                    "name": project.name,
-                    "description": project.description,
-                    "status": project.status.value,
-                },
-                "knowledge": [await serializer.knowledge(item) for item in knowledge],
-                "tasks": [serializer.task(task) for task in tasks],
-            }
-            await _audit(session, "get_project_context", len(knowledge) + len(tasks))
-            return result
-
-    @server.tool(
         name="search_tasks",
         title="Поиск задач",
         description=(
-            "Найти задачи по тексту и/или списку. view: today, week, month, long_term, "
-            "someday, no_group, inbox, all, done."
+            "Найти задачи по тексту и/или списку. view: today, week, no_group, all."
         ),
     )
     async def search_tasks(query: str = "", view: str = "", limit: int = 10) -> dict[str, Any]:

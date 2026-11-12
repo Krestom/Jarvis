@@ -9,8 +9,8 @@ from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.db.models import Task
-from jarvis.domain.buckets import DONE_STATUSES, month_window, today_window, week_window
-from jarvis.domain.enums import TaskBucket, TaskStatus
+from jarvis.domain.enums import TaskStatus
+from jarvis.domain.windows import DONE_STATUSES, today_window, week_window
 
 
 def _active() -> tuple[ColumnElement[bool], ColumnElement[bool]]:
@@ -52,11 +52,11 @@ class TaskRepository:
         task.deleted_at = func.now()
         await self._session.flush()
 
-    # --- Списки (динамические группы, см. domain/buckets.py) ---
+    # --- Списки (календарные границы, см. domain/windows.py) ---
 
     def _today_cond(self, now: datetime, tz: ZoneInfo) -> ColumnElement[bool]:
         _, end_today = today_window(now, tz)
-        return or_(Task.bucket == TaskBucket.TODAY, Task.due_at < end_today)
+        return Task.due_at < end_today
 
     async def list_today(
         self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
@@ -74,52 +74,14 @@ class TaskRepository:
         self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
     ) -> list[Task]:
         start_week, end_week = week_window(now, tz)
-        due_this_week = (Task.due_at >= start_week) & (Task.due_at < end_week)
-        week_bucket_not_today = (Task.bucket == TaskBucket.WEEK) & or_(
-            Task.due_at.is_(None), Task.due_at >= start_week
-        )
         stmt = (
             select(Task)
-            .where(*_active(), or_(due_this_week, week_bucket_not_today))
-            .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
-
-    async def list_month(
-        self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
-    ) -> list[Task]:
-        """Задачи на остаток месяца (после текущей недели, до конца месяца)."""
-        start, end = month_window(now, tz)
-        stmt = (
-            select(Task)
-            .where(*_active(), Task.due_at >= start, Task.due_at < end)
+            .where(
+                *_active(),
+                Task.due_at >= start_week,
+                Task.due_at < end_week,
+            )
             .order_by(Task.due_at.asc(), Task.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
-
-    async def list_long_term(
-        self, now: datetime, tz: ZoneInfo, *, limit: int = 20, offset: int = 0
-    ) -> list[Task]:
-        """Долгосрочные: группа long_term или срок за пределами текущего месяца."""
-        _, end_month = month_window(now, tz)
-        stmt = (
-            select(Task)
-            .where(*_active(), or_(Task.bucket == TaskBucket.LONG_TERM, Task.due_at >= end_month))
-            .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
-
-    async def list_someday(self, *, limit: int = 20, offset: int = 0) -> list[Task]:
-        stmt = (
-            select(Task)
-            .where(*_active(), Task.bucket == TaskBucket.SOMEDAY)
-            .order_by(Task.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
@@ -128,31 +90,8 @@ class TaskRepository:
     async def list_no_group(self, *, limit: int = 20, offset: int = 0) -> list[Task]:
         stmt = (
             select(Task)
-            .where(*_active(), Task.bucket.is_(None), Task.due_at.is_(None))
+            .where(*_active(), Task.due_at.is_(None))
             .order_by(Task.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
-
-    async def list_inbox(self, *, limit: int = 20, offset: int = 0) -> list[Task]:
-        stmt = (
-            select(Task)
-            .where(
-                Task.deleted_at.is_(None),
-                Task.status == TaskStatus.INBOX,
-            )
-            .order_by(Task.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
-
-    async def list_done(self, *, limit: int = 20, offset: int = 0) -> list[Task]:
-        stmt = (
-            select(Task)
-            .where(Task.deleted_at.is_(None), Task.status == TaskStatus.DONE)
-            .order_by(Task.completed_at.desc().nulls_last(), Task.updated_at.desc())
             .limit(limit)
             .offset(offset)
         )
@@ -245,32 +184,11 @@ class TaskRepository:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
-    async def list_by_category(
-        self, category_id: uuid.UUID, *, limit: int = 20, offset: int = 0
-    ) -> list[Task]:
-        stmt = (
-            select(Task)
-            .where(*_active(), Task.category_id == category_id)
-            .order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
-
     async def count_active(self) -> int:
         result = await self._session.execute(
             select(func.count()).select_from(Task).where(*_active())
         )
         return int(result.scalar_one())
-
-    async def list_for_project(self, project_id: uuid.UUID, *, limit: int = 20) -> list[Task]:
-        stmt = (
-            select(Task)
-            .where(Task.deleted_at.is_(None), Task.project_id == project_id)
-            .order_by(Task.updated_at.desc())
-            .limit(limit)
-        )
-        return list((await self._session.execute(stmt)).scalars().all())
 
     async def search(self, query: str, *, limit: int = 10, offset: int = 0) -> list[Task]:
         tsquery = func.websearch_to_tsquery("russian", query)

@@ -12,12 +12,10 @@ from jarvis.bot.keyboards import (
     cancel_flow_keyboard,
     comments_keyboard,
     confirm_keyboard,
-    diary_reminder_keyboard,
     document_card_keyboard,
     knowledge_card_keyboard,
     secret_card_keyboard,
     secrets_list_keyboard,
-    settings_keyboard,
     task_card_keyboard,
 )
 
@@ -61,12 +59,6 @@ def test_task_card_back_from_list():
     assert "📋 К спискам" not in styles
 
 
-def test_diary_reminder_colors():
-    styles = styles_by_text(diary_reminder_keyboard())
-    assert styles["✍️ Сделать запись"] == "primary"
-    assert styles["⏰ Перенести"] is None
-
-
 def test_knowledge_card_delete_is_danger():
     styles = styles_by_text(knowledge_card_keyboard("ab" * 16))
     assert styles["🗑 Удалить"] == "danger"
@@ -77,7 +69,6 @@ def test_document_card_colors():
     styles = styles_by_text(document_card_keyboard("ab" * 16, can_download=True))
     assert styles["📤 Получить файл"] == "primary"
     assert styles["🗑 Удалить"] == "danger"
-    assert styles["🗂 Категория"] is None
 
 
 def test_secret_card_and_list_colors():
@@ -88,9 +79,7 @@ def test_secret_card_and_list_colors():
     assert lst["➕ Новый секрет"] == "primary"
 
 
-def test_settings_and_comments_primary():
-    settings = styles_by_text(settings_keyboard([]))
-    assert settings["➕ Новая категория"] == "primary"
+def test_comments_primary():
     comments = styles_by_text(comments_keyboard([], "ab" * 16))
     assert comments["➕ Добавить комментарий"] == "primary"
 

@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import func, select
 
 from jarvis.db.models import AuditLog, Task
-from jarvis.domain.enums import PendingOpType, PendingStatus, TaskBucket
+from jarvis.domain.enums import PendingOpType, PendingStatus
 from jarvis.repositories.pending import PendingOperationRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.confirmation import ConfirmationService
@@ -89,14 +89,14 @@ async def test_update_task_applies_changes(session, test_settings):
     operation_id = await service.propose(
         USER,
         PendingOpType.UPDATE_TASK,
-        {"task_id": str(task_id), "changes": {"bucket": TaskBucket.WEEK.value}},
+        {"task_id": str(task_id), "changes": {"title": "Новый срок"}},
     )
     result = await service.confirm(USER, operation_id)
     assert result.ok
 
     task = await TaskRepository(session).get(task_id)
     assert task is not None
-    assert task.bucket == TaskBucket.WEEK
+    assert task.title == "Новый срок"
 
 
 async def test_failed_apply_is_reported_and_recorded(session, test_settings):

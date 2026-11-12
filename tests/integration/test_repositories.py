@@ -7,12 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from jarvis.domain.enums import (
-    KnowledgeType,
-    Sensitivity,
-    TaskBucket,
-)
-from jarvis.repositories.categories import DEFAULT_CATEGORIES, CategoryRepository
+from jarvis.domain.enums import KnowledgeType, Sensitivity
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.processed_updates import ProcessedUpdateRepository
 from jarvis.repositories.tasks import TaskRepository
@@ -23,23 +18,13 @@ TZ = ZoneInfo("Europe/Moscow")
 NOW = datetime(2026, 10, 15, 12, 0, tzinfo=TZ)  # четверг
 
 
-async def test_categories_ensure_defaults_idempotent(session):
-    repo = CategoryRepository(session)
-    assert await repo.ensure_defaults() == len(DEFAULT_CATEGORIES)
-    assert await repo.ensure_defaults() == 0
-    assert await repo.find_by_name("СЕРВЕРЫ И ИНФРАСТРУКТУРА") is not None
-
-
-async def test_task_dynamic_bucket_lists(session):
+async def test_task_calendar_lists(session):
     repo = TaskRepository(session)
     await repo.create(title="Сегодня", due_at=NOW.replace(hour=18))
     await repo.create(title="Просрочено", due_at=NOW - timedelta(days=2))
     await repo.create(title="Неделя", due_at=(NOW + timedelta(days=2)).replace(hour=10))
-    await repo.create(title="Месяц", due_at=(NOW + timedelta(days=10)).replace(hour=9))
-    await repo.create(title="Долго", bucket=TaskBucket.LONG_TERM)
-    await repo.create(title="Когда-нибудь", bucket=TaskBucket.SOMEDAY)
-    await repo.create(title="Без группы")
-    await repo.create(title="Следующий месяц", due_at=(NOW + timedelta(days=30)).replace(hour=9))
+    await repo.create(title="Следующая неделя", due_at=(NOW + timedelta(days=10)).replace(hour=9))
+    await repo.create(title="Без срока")
 
     today = {task.title for task in await repo.list_today(NOW, TZ)}
     assert today == {"Сегодня", "Просрочено"}
@@ -48,16 +33,14 @@ async def test_task_dynamic_bucket_lists(session):
     assert week == {"Неделя", "Сегодня"}
     assert "Просрочено" not in week
 
-    # Месяц — продолжение недели: дальние дни месяца, но не следующего и не неделя.
-    month = {task.title for task in await repo.list_month(NOW, TZ)}
-    assert month == {"Месяц"}
-
-    # Долгосрочные — группа long_term или срок за пределами текущего месяца.
-    long_term = {task.title for task in await repo.list_long_term(NOW, TZ)}
-    assert long_term == {"Долго", "Следующий месяц"}
-
-    assert [t.title for t in await repo.list_someday()] == ["Когда-нибудь"]
-    assert [t.title for t in await repo.list_no_group()] == ["Без группы"]
+    assert [t.title for t in await repo.list_no_group()] == ["Без срока"]
+    assert {t.title for t in await repo.list_all()} == {
+        "Сегодня",
+        "Просрочено",
+        "Неделя",
+        "Следующая неделя",
+        "Без срока",
+    }
 
 
 async def test_task_status_filters(session):
@@ -65,12 +48,8 @@ async def test_task_status_filters(session):
     await repo.create(title="Готово", status="done")
     await repo.create(title="В работе")
 
-    from jarvis.domain.enums import TaskStatus
-
-    done = await repo.list_done()
-    assert [t.title for t in done] == ["Готово"]
     assert await repo.count_active() == 1
-    assert TaskStatus.DONE in {t.status for t in done}
+    assert [t.title for t in await repo.list_all()] == ["В работе"]
 
 
 async def test_knowledge_fulltext_search_russian(session):

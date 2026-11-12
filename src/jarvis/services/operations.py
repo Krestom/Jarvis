@@ -6,17 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.config.settings import Settings
 from jarvis.domain.enums import EntityType, PendingOpType
-from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import (
-    CategoryDraft,
-    CategoryRename,
     DocumentDraft,
     DocumentUpdate,
     EntityRef,
     KnowledgeDraft,
     KnowledgeUpdate,
-    ProjectDraft,
     SecretCreateDraft,
     TaskDraft,
     TaskUpdate,
@@ -47,14 +43,6 @@ async def apply_operation(
     """Применить подтверждённую операцию. Payload валидируется заново."""
     if operation_type == PendingOpType.CREATE_TASK:
         payload = dict(payload)
-        # Категория могла быть ещё не создана на момент предложения: разрешаем по
-        # имени и создаём при необходимости (пользователь подтвердил и задачу).
-        if not payload.get("category_id") and payload.get("category_name"):
-            repo = CategoryRepository(session)
-            category = await repo.find_by_name(str(payload["category_name"]))
-            if category is None:
-                category = await repo.create(str(payload["category_name"])[:120])
-            payload["category_id"] = str(category.id)
         draft = TaskDraft.model_validate(payload)
         task_id = await TaskService(session).create_from_draft(draft)
         return AppliedOperation(EntityType.TASK, task_id, f"Задача создана: {draft.title}")
@@ -115,41 +103,6 @@ async def apply_operation(
         await KnowledgeService(session).soft_delete(ref.entity_id)
         return AppliedOperation(EntityType.KNOWLEDGE, ref.entity_id, "Запись удалена")
 
-    if operation_type == PendingOpType.CREATE_CATEGORY:
-        draft = CategoryDraft.model_validate(payload)
-        repo = CategoryRepository(session)
-        existing = await repo.find_by_name(draft.name)
-        if existing is not None:
-            # Идемпотентно: категорию могла создать привязка задачи чуть раньше.
-            return AppliedOperation(
-                EntityType.CATEGORY, existing.id, f"Категория уже существует: {draft.name}"
-            )
-        category = await repo.create(draft.name)
-        return AppliedOperation(
-            EntityType.CATEGORY, category.id, f"Категория создана: {draft.name}"
-        )
-
-    if operation_type == PendingOpType.CREATE_PROJECT:
-        from jarvis.repositories.projects import ProjectRepository
-
-        draft = ProjectDraft.model_validate(payload)
-        repo = ProjectRepository(session)
-        if await repo.find_by_name(draft.name) is not None:
-            raise OperationError("Проект с таким названием уже существует")
-        project = await repo.create(name=draft.name, description=draft.description)
-        return AppliedOperation(EntityType.PROJECT, project.id, f"Проект создан: {draft.name}")
-
-    if operation_type == PendingOpType.RENAME_CATEGORY:
-        rename = CategoryRename.model_validate(payload)
-        repo = CategoryRepository(session)
-        category = await repo.get(rename.category_id)
-        if category is None:
-            raise NotFoundError("Категория не найдена")
-        await repo.rename(category, rename.new_name)
-        return AppliedOperation(
-            EntityType.CATEGORY, category.id, f"Категория переименована: {rename.new_name}"
-        )
-
     if operation_type == PendingOpType.SAVE_DOCUMENT:
         from jarvis.documents.storage import EncryptedFileStorage
         from jarvis.services.documents import DocumentService
@@ -172,17 +125,11 @@ async def apply_operation(
         document = await repo.get(update.document_id)
         if document is None:
             raise NotFoundError("Документ не найден")
-        # Меняем только явно переданные поля: title, category_id (с возможной
-        # очисткой) и/или sensitivity — payload задаёт ровно то, что меняется.
+        # Меняем только явно переданные поля: title и/или sensitivity —
+        # payload задаёт ровно то, что меняется.
         fields: dict = {}
         if update.title is not None:
             fields["title"] = update.title
-        if "category_id" in update.model_fields_set:
-            if update.category_id is not None and (
-                await CategoryRepository(session).get(update.category_id) is None
-            ):
-                raise OperationError("Категория не найдена")
-            fields["category_id"] = update.category_id
         if update.sensitivity is not None:
             fields["sensitivity"] = update.sensitivity
         if fields:

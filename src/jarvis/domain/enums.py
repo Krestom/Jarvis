@@ -16,7 +16,6 @@ class KnowledgeType(StrEnum):
     REFERENCE = "reference"
     INSTRUCTION = "instruction"
     DECISION = "decision"
-    PROJECT_CONTEXT = "project_context"
 
 
 class KnowledgeSource(StrEnum):
@@ -32,7 +31,6 @@ class KnowledgeStatus(StrEnum):
 
 
 class TaskStatus(StrEnum):
-    INBOX = "inbox"
     TODO = "todo"
     IN_PROGRESS = "in_progress"
     WAITING = "waiting"
@@ -45,26 +43,6 @@ class TaskPriority(StrEnum):
     NORMAL = "normal"
     HIGH = "high"
     URGENT = "urgent"
-
-
-class TaskBucket(StrEnum):
-    """Группа-намерение. Отсутствие группы (None) = "без группы".
-
-    «Сегодня»/«На этой неделе» — динамические списки, вычисляемые по календарю,
-    см. jarvis.domain.buckets.
-    """
-
-    TODAY = "today"
-    WEEK = "week"
-    LONG_TERM = "long_term"
-    SOMEDAY = "someday"
-
-
-class ProjectStatus(StrEnum):
-    ACTIVE = "active"
-    PAUSED = "paused"
-    DONE = "done"
-    ARCHIVED = "archived"
 
 
 class DocumentType(StrEnum):
@@ -95,9 +73,7 @@ class EntityType(StrEnum):
     TASK = "task"
     KNOWLEDGE = "knowledge"
     DOCUMENT = "document"
-    PROJECT = "project"
     SECRET = "secret"
-    CATEGORY = "category"
 
 
 class ImprovementCategory(StrEnum):
@@ -139,9 +115,6 @@ class PendingOpType(StrEnum):
     CREATE_KNOWLEDGE = "create_knowledge"
     UPDATE_KNOWLEDGE = "update_knowledge"
     DELETE_KNOWLEDGE = "delete_knowledge"
-    CREATE_PROJECT = "create_project"
-    CREATE_CATEGORY = "create_category"
-    RENAME_CATEGORY = "rename_category"
     SAVE_DOCUMENT = "save_document"
     UPDATE_DOCUMENT = "update_document"
     DELETE_DOCUMENT = "delete_document"

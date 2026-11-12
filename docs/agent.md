@@ -1,9 +1,8 @@
 # AI-агент Jarvis (Stage 3)
 
 Jarvis — не командный бот с меню, а ассистент: пользователь пишет естественно
-(«Джарвис, какие задачи по проекту SuperSport ещё не закрыты?»), а агент сам
-вызывает типизированные инструменты, получает реальные данные и собирает ответ
-или интерактивный UI. Всё, что показывает агент, приходит из БД приложения —
+(«Джарвис, какие задачи на неделе?»), а агент сам вызывает типизированные
+инструменты, получает реальные данные и собирает ответ или интерактивный UI. Всё, что показывает агент, приходит из БД приложения —
 модель не выдумывает сущности.
 
 ## Архитектура
@@ -24,7 +23,7 @@ bot/handlers/free_text.py ──► conversation/engine.py  (роутинг)
                           ├─ AIProvider.plan()  LLM (OpenCode Go / fake / none)
                           └─ agent/tools        типизированный реестр инструментов
                                   │
-                                  ├─ TaskService / репозитории (задачи, проекты, знания)
+                                  ├─ TaskService / репозитории (задачи, знания)
                                   ├─ ConfirmationService (высокий риск → кнопка)
                                   ├─ ImprovementService (пробелы → backlog)
                                   └─ research/ (web_search: none | fake)
@@ -60,44 +59,38 @@ bot/handlers/free_text.py ──► conversation/engine.py  (роутинг)
 
 | Инструмент | Тип | Риск | Назначение |
 |---|---|---|---|
-| `list_tasks` | read | low | списки (today/week/…/done + `all` — все незавершённые), на дату (`on_date`), по категории (`category`) |
-| `list_project_tasks` | read | low | незавершённые задачи проекта по названию |
+| `list_tasks` | read | low | списки (today/week/no_group/all), на дату (`on_date`) |
 | `search_tasks` | read | low | FTS + подстрочный поиск задач |
 | `get_task` | read | low | карточка задачи + последние комментарии |
 | `search_all` | read | low | знания + задачи + документы |
 | `get_knowledge` | read | low | полный текст записи знаний (в т.ч. чувствительных) |
 | `send_document` | read | low | файл документа вложением в чат (расшифровка на время отправки) |
-| `list_projects` | read | low | проекты (id/названия) |
 | `create_task` | mutation | low | превью + кнопка: задача создаётся после подтверждения |
-| `create_category` | mutation | low | превью + кнопка; идемпотентно (уже есть / уже предложена) |
-| `rename_category` | mutation | low | превью + кнопка: переименование категории-папки |
-| `update_task` | mutation | low | превью + кнопка: статус/приоритет/группа/срок/заголовок/проект (проект создаётся, если его нет; `project=«нет»` — убрать); `due_at=null` — убрать срок |
+| `update_task` | mutation | low | превью + кнопка: статус/срок/заголовок; `due_at=null` — убрать срок |
 | `add_comment` | mutation | low | превью + кнопка: комментарий к задаче |
 | `update_comment` | mutation | low | превью + кнопка: правка текста комментария (id из get_task) |
 | `delete_task` | mutation | **high** | только отправляет pending-подтверждение |
 | `delete_knowledge` | mutation | **high** | только отправляет pending-подтверждение (удаление заметки) |
 | `delete_document` | mutation | **high** | только отправляет pending-подтверждение (удаление документа) |
 | `create_knowledge` | mutation | medium | превью + кнопка: заметка (sensitive=true для кредов) |
-| `update_knowledge` | mutation | medium | превью + кнопка: правка заметки (заголовок/сводка/текст/категория/проект/чувствительность), работает и с sensitive |
-| `update_document` | mutation | medium | превью + кнопка: название, категория-папка и/или чувствительность документа |
+| `update_knowledge` | mutation | medium | превью + кнопка: правка заметки (заголовок/сводка/текст/чувствительность), работает и с sensitive |
+| `update_document` | mutation | medium | превью + кнопка: название и/или чувствительность документа |
 | `web_search` | read | low | внешний поиск (Tavily; источники указываются в ответе) |
 | `report_capability_gap` | mutation | low | запись пробела в improvement backlog |
 | `list_improvements` | read | low | чтение backlog (для «покажи бэклог») |
 | `daily_stats` | read | low | дневная статистика: действия по типам, закрытые задачи, новые записи backlog (date — по умолчанию сегодня) |
 | `update_improvement` | mutation | medium | смена статуса записи backlog (как в /diagnostics; применяется сразу, без кнопки) |
-| `export_chat` | read | low | журнал диалога за день (MD + JSON) файлами в чат |
 | `export_issues` | read | low | improvement backlog (диагностика) файлами MD + JSON в чат |
 
-Файлы, подготовленные `send_document`/`export_chat`/`export_issues`, уходят в чат
+Файлы, подготовленные `send_document`/`export_issues`, уходят в чат
 вложениями сразу после текста ответа (поле `files` результата агента →
 `EngineOutcome`).
 
 Экраны (`ui = {"component": "screen", ...}`) — allow-list в
-`AgentService._validate_screen`: `tasks` (view= today/week/month/long_term/
-someday/no_group/inbox/all/done, либо on_date, либо category), `search`
-(query), `documents` (category), `knowledge` (последние записи), `card`
-(kind=task|knowledge|document + id). Сервер строит настоящие списки и карточки
-с живыми кнопками действий; параметры валидируются, неизвестные экраны
+`AgentService._validate_screen`: `tasks` (view= today/week/no_group/all,
+либо on_date), `search` (query), `documents`, `knowledge` (последние записи),
+`card` (kind=task|knowledge|document + id). Сервер строит настоящие списки и
+карточки с живыми кнопками действий; параметры валидируются, неизвестные экраны
 отбрасываются. Списки задач, документов и знаний — по 7 на страницу со стрелками
 «⬅️/➡️» (как в классических `/tasks`, `/documents`, меню «Знания»).
 
@@ -108,17 +101,14 @@ someday/no_group/inbox/all/done, либо on_date, либо category), `search`
 
 | Место UI | Кнопки | Чем закрывает агент |
 |---|---|---|
-| Главное меню | 🔎 Поиск, ✅ Задачи, 📔 Дневник, 📚 Знания, 📄 Документы, 🗂 Проекты, ⚙️ Настройки | экраны `search`/`tasks`/`knowledge`/`documents`, `list_projects`+`create_project`, `create_category`+`rename_category`; дневник агенту недоступен (личное, только в боте) |
-| Меню «Задачи» | Сегодня, На этой неделе, В этом месяце, Все задачи, Без срока, Выполненные, По категориям | экран `tasks` (`view`, `category`); `on_date` — для «задачи на 19 октября» |
-| Карточка задачи | изменить срок, группа, завершить/вернуть, комментарии (список/добавить/править), удалить, к спискам | `update_task` (срок/группа/статус/проект), экран `card`, `list_comments`+`add_comment`+`update_comment`, `delete_task` |
+| Главное меню | 🔎 Поиск, ✅ Задачи, 📚 Знания, 📄 Документы | экраны `search`/`tasks`/`knowledge`/`documents` |
+| Меню «Задачи» | Сегодня, На этой неделе, Все задачи, Без срока | экран `tasks` (`view`); `on_date` — для «задачи на 19 октября» |
+| Карточка задачи | изменить срок, завершить/вернуть, комментарии (список/добавить/править), удалить, к спискам | `update_task` (срок/статус), экран `card`, `list_comments`+`add_comment`+`update_comment`, `delete_task` |
 | Знания | список, карточка, полный текст, похожие, удалить | экран `knowledge`, экран `card`, `get_knowledge`, `search_all`, `delete_knowledge` |
-| Документы | список, по категориям, карточка, получить файл, категория, удалить | экраны `documents`/`card`, `send_document`, `update_document`, `delete_document` |
-| Проекты | список, новый проект | `list_projects`, `create_project` (редактирования проектов нет и в UI) |
-| Настройки | категории: новая/переименовать | `create_category`, `rename_category` |
+| Документы | список, карточка, получить файл, удалить | экраны `documents`/`card`, `send_document`, `update_document`, `delete_document` |
 | Диагностика | backlog, статусы, экспорт, удаление записи | `list_improvements`, `update_improvement`, `export_issues`; экран открывается quick action «🩺 Диагностика». Удаление записей — только в `/diagnostics` (необратимо) |
-| Экспорты | `/export_chat`, `/export_issues` | `export_chat`, `export_issues` |
+| Экспорты | `/export_issues` | `export_issues` |
 | Секреты | все | исключены владельцем (значения не должны проходить через LLM) |
-| Дневник | экран дня, запись, правка, удаление | только в боте; агенту, поиску и MCP недоступен (личные записи) |
 
 Ошибки различаются по видам: `validation`, `not_found`, `unsupported`,
 `transient` (единственный вид, который повторяется — до
@@ -270,7 +260,6 @@ web-поиск, backlog-пробел); агентский цикл (инстру
 - Параллельные read-инструменты внутри запроса не запускаются: выгоды нет,
   бюджет проще (последовательная модель).
 - Агент не создаёт секреты и документы: секреты — через /secret, документы —
-  вложением файла; категории задач/документов создаются инструментом
-  `create_category` или в /settings.
+  вложением файла.
 - Агент не удаляет заметки: удаление записи знаний — кнопкой в карточке
   (/knowledge); у агента есть только правка (`update_knowledge`).

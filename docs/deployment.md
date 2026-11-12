@@ -122,7 +122,7 @@ docker compose up -d --build
    данные — в томе `jarvis-pgdata`.
 3. `app` стартует только после `postgres` (condition: service_healthy).
    Entrypoint (`docker/entrypoint.sh`) применяет миграции: `alembic upgrade head`.
-   Далее приложение ждёт доступную БД, создаёт стартовые категории, поднимает
+   Далее приложение ждёт доступную БД, поднимает
    `/healthz` на `0.0.0.0:8080` внутри контейнера и запускает Telegram-поллинг и
    фоновую уборку.
 4. `mcp` стартует после `app` с `SKIP_MIGRATIONS=1` — миграции применяет только

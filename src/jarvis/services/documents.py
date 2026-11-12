@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jarvis.config.settings import Settings
 from jarvis.documents.storage import EncryptedFileStorage, StorageError
 from jarvis.domain.enums import DocumentStatus
-from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.services.drafts import DocumentDraft
 from jarvis.services.errors import NotFoundError, OperationError
@@ -40,7 +39,6 @@ class DocumentService:
         self._settings = settings
         self._storage = storage
         self._repo = DocumentRepository(session)
-        self._categories = CategoryRepository(session)
 
     def validate_upload(self, size_bytes: int, mime_type: str | None) -> None:
         if size_bytes <= 0:
@@ -82,16 +80,11 @@ class DocumentService:
             raise NotFoundError("Документ не найден (возможно, устарел)")
         if document.status == DocumentStatus.ACTIVE:
             return document  # идемпотентно
-        if draft.category_id is not None and (
-            await self._categories.get(draft.category_id) is None
-        ):
-            raise OperationError("Категория не найдена")
         self._storage.promote(document.storage_key)
         await self._repo.update(
             document,
             title=draft.title,
             document_type=draft.document_type,
-            category_id=draft.category_id,
             sensitivity=draft.sensitivity,
             status=DocumentStatus.ACTIVE,
         )

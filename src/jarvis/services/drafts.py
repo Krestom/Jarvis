@@ -18,8 +18,6 @@ from jarvis.domain.enums import (
     KnowledgeType,
     SecretType,
     Sensitivity,
-    TaskBucket,
-    TaskPriority,
     TaskStatus,
 )
 
@@ -29,14 +27,7 @@ class TaskDraft(BaseModel):
     description: str | None = None
     original_text: str | None = None
     status: TaskStatus = TaskStatus.TODO
-    priority: TaskPriority = TaskPriority.NORMAL
-    bucket: TaskBucket | None = None
     due_at: datetime | None = None
-    category_id: uuid.UUID | None = None
-    # Категорию предложено создать; id разрешается при подтверждении операции.
-    category_name: str | None = Field(default=None, max_length=120)
-    project_id: uuid.UUID | None = None
-    project_name: str | None = Field(default=None, max_length=200)
 
 
 class TaskUpdate(BaseModel):
@@ -45,13 +36,7 @@ class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     description: str | None = None
     status: TaskStatus | None = None
-    priority: TaskPriority | None = None
-    bucket: TaskBucket | None = None
     due_at: datetime | None = None
-    category_id: uuid.UUID | None = None
-    project_id: uuid.UUID | None = None
-    # Проект назван, но может ещё не существовать — создастся при применении.
-    project_name: str | None = Field(default=None, max_length=200)
 
 
 class CommentDraft(BaseModel):
@@ -72,9 +57,6 @@ class KnowledgeDraft(BaseModel):
     content: str = Field(min_length=1)
     source_type: KnowledgeSource = KnowledgeSource.TEXT
     original_text: str | None = None
-    category_id: uuid.UUID | None = None
-    project_id: uuid.UUID | None = None
-    project_name: str | None = Field(default=None, max_length=200)
     sensitivity: Sensitivity = Sensitivity.NORMAL
 
 
@@ -83,8 +65,6 @@ class KnowledgeUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     summary: str | None = None
     content: str | None = Field(default=None, min_length=1)
-    category_id: uuid.UUID | None = None
-    project_id: uuid.UUID | None = None
     sensitivity: Sensitivity | None = None
 
 
@@ -94,16 +74,14 @@ class DocumentDraft(BaseModel):
     document_id: uuid.UUID
     title: str = Field(min_length=1, max_length=300)
     document_type: DocumentType = DocumentType.OTHER
-    category_id: uuid.UUID | None = None
     sensitivity: Sensitivity = Sensitivity.SENSITIVE
 
 
 class DocumentUpdate(BaseModel):
-    """Изменение метаданных документа (название, категория-папка, чувствительность)."""
+    """Изменение метаданных документа (название, чувствительность)."""
 
     document_id: uuid.UUID
     title: str | None = Field(default=None, min_length=1, max_length=300)
-    category_id: uuid.UUID | None = None
     sensitivity: Sensitivity | None = None
 
 
@@ -115,22 +93,6 @@ class SecretCreateDraft(BaseModel):
     secret_type: SecretType = SecretType.OTHER
     encrypted_value_b64: str
     key_version: int
-    project_id: uuid.UUID | None = None
-    category_id: uuid.UUID | None = None
-
-
-class CategoryDraft(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-
-
-class ProjectDraft(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    description: str | None = None
-
-
-class CategoryRename(BaseModel):
-    category_id: uuid.UUID
-    new_name: str = Field(min_length=1, max_length=120)
 
 
 class EntityRef(BaseModel):

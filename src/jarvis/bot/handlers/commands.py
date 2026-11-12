@@ -15,16 +15,11 @@ from jarvis.config.settings import Settings
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
 from jarvis.repositories.conversation import ConversationRepository
-from jarvis.services.catalog import CatalogService
 from jarvis.services.confirmation import ConfirmationService
 
 
-async def cmd_start(message: Message, session: AsyncSession) -> None:
-    created = await CatalogService(session).ensure_defaults()
-    text = START_TEXT
-    if created:
-        text += f"\nСоздал {created} стартовых категорий — их можно переименовать в /settings."
-    await message.answer(text, reply_markup=main_menu())
+async def cmd_start(message: Message) -> None:
+    await message.answer(START_TEXT, reply_markup=main_menu())
 
 
 async def cmd_help(message: Message) -> None:
@@ -64,24 +59,10 @@ async def cmd_today(message: Message, session: AsyncSession, settings: Settings)
     await send_task_list(message, session, settings, view="today", page=0)
 
 
-async def cmd_inbox(message: Message, session: AsyncSession, settings: Settings) -> None:
-    from jarvis.bot.handlers.tasks import send_task_list
-
-    await send_task_list(message, session, settings, view="inbox", page=0)
-
-
 async def cmd_documents(message: Message, session: AsyncSession) -> None:
     from jarvis.bot.handlers.documents import send_documents_list
 
     await send_documents_list(message, session, page=0)
-
-
-async def cmd_diary(
-    message: Message, session: AsyncSession, settings: Settings
-) -> None:
-    from jarvis.bot.handlers.diary import send_diary_day
-
-    await send_diary_day(message, session, settings)
 
 
 async def cmd_secret(
@@ -92,12 +73,6 @@ async def cmd_secret(
     await start_secret_flow(message, session, settings, ai)
 
 
-async def cmd_settings(message: Message, session: AsyncSession, settings: Settings) -> None:
-    from jarvis.bot.handlers.menu import send_settings
-
-    await send_settings(message, session, settings)
-
-
 def build_router() -> Router:
     router = Router(name="commands")
     router.message.register(cmd_start, CommandStart())
@@ -106,9 +81,6 @@ def build_router() -> Router:
     router.message.register(cmd_search, Command("search"))
     router.message.register(cmd_tasks, Command("tasks"))
     router.message.register(cmd_today, Command("today"))
-    router.message.register(cmd_inbox, Command("inbox"))
     router.message.register(cmd_documents, Command("documents"))
-    router.message.register(cmd_diary, Command("diary"))
     router.message.register(cmd_secret, Command("secret"))
-    router.message.register(cmd_settings, Command("settings"))
     return router

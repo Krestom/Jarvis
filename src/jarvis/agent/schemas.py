@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 class EntityCandidate(BaseModel):
     """Реальная сущность из данных приложения (для кнопок и контекста)."""
 
-    kind: Literal["task", "project", "knowledge"]
+    kind: Literal["task", "knowledge"]
     id: uuid.UUID
     title: str = Field(max_length=300)
 

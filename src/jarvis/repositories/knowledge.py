@@ -48,23 +48,6 @@ class KnowledgeRepository:
         )
         return list(result.scalars().all())
 
-    async def list_for_project(
-        self,
-        project_id: uuid.UUID,
-        *,
-        allowed_sensitivities: list[Sensitivity] | None = None,
-        limit: int = 20,
-    ) -> list[KnowledgeItem]:
-        stmt = select(KnowledgeItem).where(
-            KnowledgeItem.deleted_at.is_(None),
-            KnowledgeItem.project_id == project_id,
-        )
-        if allowed_sensitivities is not None:
-            stmt = stmt.where(KnowledgeItem.sensitivity.in_(allowed_sensitivities))
-        stmt = stmt.order_by(KnowledgeItem.updated_at.desc()).limit(limit)
-        result = await self._session.execute(stmt)
-        return list(result.scalars().all())
-
     async def search(
         self,
         query: str,
@@ -72,8 +55,6 @@ class KnowledgeRepository:
         limit: int = 10,
         offset: int = 0,
         types: list[KnowledgeType] | None = None,
-        category_id: uuid.UUID | None = None,
-        project_id: uuid.UUID | None = None,
         allowed_sensitivities: list[Sensitivity] | None = None,
     ) -> list[KnowledgeItem]:
         tsquery = func.websearch_to_tsquery("russian", query)
@@ -83,10 +64,6 @@ class KnowledgeRepository:
         )
         if types:
             stmt = stmt.where(KnowledgeItem.type.in_(types))
-        if category_id is not None:
-            stmt = stmt.where(KnowledgeItem.category_id == category_id)
-        if project_id is not None:
-            stmt = stmt.where(KnowledgeItem.project_id == project_id)
         if allowed_sensitivities is not None:
             stmt = stmt.where(KnowledgeItem.sensitivity.in_(allowed_sensitivities))
         stmt = (

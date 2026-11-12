@@ -11,10 +11,7 @@ UIAction = Literal[
     "search",
     "tasks_today",
     "tasks_week",
-    "tasks_inbox",
     "documents",
-    "projects",
-    "settings",
     "diagnostics",
 ]
 
@@ -24,7 +21,6 @@ Intent = Literal[
     "list_comments",
     "list_tasks",
     "create_knowledge",
-    "create_project",
     "search",
     "smalltalk",
     "clarify",
@@ -79,7 +75,7 @@ class EntityChoice(BaseModel):
     """Выбор из реальных кандидатов; id проверяет сервер."""
 
     component: Literal["entity_choice"]
-    entity_kind: Literal["task", "project", "knowledge"]
+    entity_kind: Literal["task", "knowledge"]
     entity_ids: list[uuid.UUID] = Field(min_length=1, max_length=6)
     prompt: str | None = Field(default=None, max_length=200)
 

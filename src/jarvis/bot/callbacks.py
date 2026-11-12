@@ -6,29 +6,22 @@ from aiogram.filters.callback_data import CallbackData
 
 
 class MenuCB(CallbackData, prefix="mn"):
-    # main|search|tasks|knowledge|documents|projects|settings|secrets|cancel_flow|
-    # category_new|category_rename|project_new|secret_new|diagnostics
+    # main|search|tasks|knowledge|documents|secrets|cancel_flow|secret_new|diagnostics
     action: str
     value: str = ""
 
 
 class TaskListCB(CallbackData, prefix="tl"):
-    # today | week | month | long_term | someday | no_group | inbox | all | done | date | category
+    # today | week | no_group | all | date
     view: str
     page: int = 0
-    value: str = ""  # id категории (view="category") или ISO-дата (view="date")
+    value: str = ""  # ISO-дата (view="date")
 
 
 class TaskCB(CallbackData, prefix="tsk"):
-    action: str  # view | due | bucket | done | delete | related | reopen | back | complete
+    action: str  # view | due | done | delete | related | reopen | back | complete
     task_id: str = ""  # uuid.hex
     value: str = ""
-
-
-class DiaryCB(CallbackData, prefix="dr"):
-    action: str  # day | write | edit | delete | delete_yes | cancel | snooze
-    entry_id: str = ""
-    day: str = ""  # ISO-дата экрана
 
 
 class KbListCB(CallbackData, prefix="kl"):
@@ -42,13 +35,11 @@ class KbCB(CallbackData, prefix="kb"):
 
 class DocListCB(CallbackData, prefix="dl"):
     page: int = 0
-    category: str = ""  # uuid.hex категории; "*" — показать список категорий
 
 
 class DocCB(CallbackData, prefix="dc"):
-    action: str  # view | download | delete | category | category_set | related
+    action: str  # view | download | delete | related
     doc_id: str = ""
-    value: str = ""  # категория для category_set (uuid.hex или none)
 
 
 class ConfirmCB(CallbackData, prefix="op"):

@@ -15,7 +15,6 @@ from jarvis.bot.keyboards import (
     uuid_hex,
 )
 from jarvis.config.settings import Settings
-from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.tasks import TaskRepository
@@ -40,17 +39,7 @@ async def render_task_card(
     task = await TaskRepository(session).get(task_id)
     if task is None:
         return None, None
-    category_name = None
-    if task.category_id:
-        category = await CategoryRepository(session).get(task.category_id)
-        category_name = category.name if category else None
-    project_name = None
-    if task.project_id:
-        from jarvis.repositories.projects import ProjectRepository
-
-        project = await ProjectRepository(session).get(task.project_id)
-        project_name = project.name if project else None
-    text = task_card_text(task, settings.tz, category_name, project_name)
+    text = task_card_text(task, settings.tz)
 
     comments = await TaskCommentRepository(session).list_for_task(task_id)
     if comments:
@@ -101,10 +90,6 @@ async def render_document_card(session: AsyncSession, document_id: uuid.UUID):
     document = await DocumentRepository(session).get(document_id)
     if document is None:
         return None, None
-    category_name = None
-    if document.category_id:
-        category = await CategoryRepository(session).get(document.category_id)
-        category_name = category.name if category else None
-    text = document_card_text(document, category_name)
+    text = document_card_text(document)
     markup = document_card_keyboard(uuid_hex(document.id), can_download=True)
     return text, markup

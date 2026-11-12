@@ -45,8 +45,6 @@ class SecretService:
             secret_type=draft.secret_type,
             encrypted_value=blob,
             key_version=draft.key_version,
-            project_id=draft.project_id,
-            category_id=draft.category_id,
         )
         return secret.id
 

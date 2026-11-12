@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from jarvis.bot.callbacks import (
     ConfirmCB,
-    DiaryCB,
     DocCB,
     DocListCB,
     ImpCB,
@@ -34,21 +32,12 @@ def main_menu() -> InlineKeyboardMarkup:
     builder.add(InlineKeyboardButton(text="🔎 Поиск", callback_data=MenuCB(action="search").pack()))
     builder.add(InlineKeyboardButton(text="✅ Задачи", callback_data=MenuCB(action="tasks").pack()))
     builder.add(
-        InlineKeyboardButton(text="📔 Дневник", callback_data=MenuCB(action="diary").pack())
-    )
-    builder.add(
         InlineKeyboardButton(text="📚 Знания", callback_data=MenuCB(action="knowledge").pack())
     )
     builder.add(
         InlineKeyboardButton(text="📄 Документы", callback_data=MenuCB(action="documents").pack())
     )
-    builder.add(
-        InlineKeyboardButton(text="🗂 Проекты", callback_data=MenuCB(action="projects").pack())
-    )
-    builder.add(
-        InlineKeyboardButton(text="⚙️ Настройки", callback_data=MenuCB(action="settings").pack())
-    )
-    builder.adjust(2, 2, 2, 1)
+    builder.adjust(2, 2)
     return builder.as_markup()
 
 
@@ -58,11 +47,7 @@ UI_ACTION_BUTTONS: dict[str, tuple[str, str]] = {
     "search": ("🔎 Поиск", MenuCB(action="search").pack()),
     "tasks_today": ("🔸 Задачи на сегодня", TaskListCB(view="today").pack()),
     "tasks_week": ("📆 Задачи на неделе", TaskListCB(view="week").pack()),
-    "tasks_inbox": ("🌀 Inbox", TaskListCB(view="inbox").pack()),
-    "diary": ("📔 Дневник", MenuCB(action="diary").pack()),
     "documents": ("📄 Документы", MenuCB(action="documents").pack()),
-    "projects": ("🗂 Проекты", MenuCB(action="projects").pack()),
-    "settings": ("⚙️ Настройки", MenuCB(action="settings").pack()),
     "diagnostics": ("🩺 Диагностика", MenuCB(action="diagnostics").pack()),
 }
 
@@ -93,7 +78,7 @@ def agent_entity_keyboard(candidates) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for index, candidate in enumerate(candidates):
         title = str(candidate.get("title") or "—")[:40]
-        kind = {"task": "✅", "project": "🗂", "knowledge": "📚"}.get(
+        kind = {"task": "✅", "knowledge": "📚"}.get(
             str(candidate.get("kind")), "•"
         )
         builder.add(
@@ -152,22 +137,15 @@ def tasks_menu_keyboard() -> InlineKeyboardMarkup:
     labels = [
         ("today", "🔸 Сегодня"),
         ("week", "📆 На этой неделе"),
-        ("month", "📅 В этом месяце"),
         ("all", "📋 Все задачи"),
         ("no_group", "📥 Без срока"),
-        ("done", "✅ Выполненные"),
     ]
     for view, label in labels:
         builder.add(InlineKeyboardButton(text=label, callback_data=TaskListCB(view=view).pack()))
     builder.add(
-        InlineKeyboardButton(
-            text="🗂 По категориям", callback_data=TaskListCB(view="category").pack()
-        )
-    )
-    builder.add(
         InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
     )
-    builder.adjust(2, 2, 2, 1, 1)
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 
@@ -224,105 +202,6 @@ def reminder_keyboard(task_id: str) -> InlineKeyboardMarkup:
     )
 
 
-def diary_reminder_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✍️ Сделать запись",
-                    callback_data=DiaryCB(action="write").pack(),
-                    style="primary",
-                ),
-                InlineKeyboardButton(
-                    text="⏰ Перенести",
-                    callback_data=DiaryCB(action="snooze").pack(),
-                ),
-            ]
-        ]
-    )
-
-
-def diary_day_keyboard(
-    entries, day: str, is_today: bool, today: str
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for index, entry in enumerate(entries, start=1):
-        builder.row(
-            InlineKeyboardButton(
-                text=f"✏️ {index}",
-                callback_data=DiaryCB(
-                    action="edit", entry_id=uuid_hex(entry.id), day=day
-                ).pack(),
-            ),
-            InlineKeyboardButton(
-                text=f"🗑 {index}",
-                callback_data=DiaryCB(
-                    action="delete", entry_id=uuid_hex(entry.id), day=day
-                ).pack(),
-                style="danger",
-            ),
-        )
-    current = date.fromisoformat(day)
-    nav = [
-        InlineKeyboardButton(
-            text="⬅️",
-            callback_data=DiaryCB(
-                action="day", day=(current - timedelta(days=1)).isoformat()
-            ).pack(),
-        )
-    ]
-    if not is_today:
-        nav.append(
-            InlineKeyboardButton(
-                text="➡️",
-                callback_data=DiaryCB(
-                    action="day", day=(current + timedelta(days=1)).isoformat()
-                ).pack(),
-            )
-        )
-    builder.row(*nav)
-    extra = []
-    if is_today:
-        extra.append(
-            InlineKeyboardButton(
-                text="➕ Сделать запись",
-                callback_data=DiaryCB(action="write", day=day).pack(),
-                style="primary",
-            )
-        )
-    else:
-        extra.append(
-            InlineKeyboardButton(
-                text="Сегодня", callback_data=DiaryCB(action="day", day=today).pack()
-            )
-        )
-    extra.append(
-        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
-    )
-    builder.row(*extra)
-    return builder.as_markup()
-
-
-def diary_delete_keyboard(entry_id: str, day: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🗑 Да, удалить",
-                    callback_data=DiaryCB(
-                        action="delete_yes", entry_id=entry_id, day=day
-                    ).pack(),
-                    style="danger",
-                ),
-                InlineKeyboardButton(
-                    text="⬅️ Отмена",
-                    callback_data=DiaryCB(action="cancel", entry_id=entry_id, day=day).pack(),
-                ),
-            ]
-        ]
-    )
-
-
 def task_card_keyboard(
     task_id: str,
     status: str,
@@ -342,12 +221,6 @@ def task_card_keyboard(
         builder.add(
             InlineKeyboardButton(
                 text="📅 Изменить срок", callback_data=TaskCB(action="due", task_id=task_id).pack()
-            )
-        )
-        builder.add(
-            InlineKeyboardButton(
-                text="🗂 Группа",
-                callback_data=TaskCB(action="bucket", task_id=task_id).pack(),
             )
         )
         builder.add(
@@ -381,7 +254,7 @@ def task_card_keyboard(
             ),
         )
     )
-    builder.adjust(2, 2, 1, 1)
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 
@@ -436,48 +309,6 @@ def force_save_keyboard() -> InlineKeyboardMarkup:
     builder.add(
         InlineKeyboardButton(
             text="🏠 В меню", callback_data=MenuCB(action="main").pack()
-        )
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def task_categories_keyboard(categories) -> InlineKeyboardMarkup:
-    """Категории-папки задач: выбор для просмотра."""
-    builder = InlineKeyboardBuilder()
-    for category in categories:
-        builder.add(
-            InlineKeyboardButton(
-                text=f"🗂 {category.name[:40]}",
-                callback_data=TaskListCB(view="category", value=uuid_hex(category.id)).pack(),
-            )
-        )
-    builder.row(
-        InlineKeyboardButton(text="📋 К спискам", callback_data=MenuCB(action="tasks").pack())
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def bucket_keyboard(task_id: str) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    options = [
-        ("today", "Сегодня"),
-        ("week", "На этой неделе"),
-        ("long_term", "Долгосрочные"),
-        ("someday", "Когда-нибудь"),
-        ("none", "Без группы"),
-    ]
-    for value, label in options:
-        builder.add(
-            InlineKeyboardButton(
-                text=label,
-                callback_data=TaskCB(action="bucket_set", task_id=task_id, value=value).pack(),
-            )
-        )
-    builder.add(
-        InlineKeyboardButton(
-            text="⬅️ Назад", callback_data=TaskCB(action="view", task_id=task_id).pack()
         )
     )
     builder.adjust(1)
@@ -545,7 +376,7 @@ def knowledge_card_keyboard(item_id: str, *, full: bool = False) -> InlineKeyboa
 
 
 def documents_list_keyboard(
-    documents, page: int, has_next: bool, category: str = ""
+    documents, page: int, has_next: bool
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for index, document in enumerate(documents, start=1):
@@ -559,67 +390,17 @@ def documents_list_keyboard(
     nav = []
     if page > 0:
         nav.append(
-            InlineKeyboardButton(
-                text="⬅️", callback_data=DocListCB(page=page - 1, category=category).pack()
-            )
+            InlineKeyboardButton(text="⬅️", callback_data=DocListCB(page=page - 1).pack())
         )
     if has_next:
         nav.append(
-            InlineKeyboardButton(
-                text="➡️", callback_data=DocListCB(page=page + 1, category=category).pack()
-            )
+            InlineKeyboardButton(text="➡️", callback_data=DocListCB(page=page + 1).pack())
         )
     if nav:
         builder.row(*nav)
     builder.row(
-        InlineKeyboardButton(
-            text="🗂 По категориям", callback_data=DocListCB(category="*").pack()
-        ),
-        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack()),
+        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
     )
-    return builder.as_markup()
-
-
-def document_categories_keyboard(categories) -> InlineKeyboardMarkup:
-    """Категории-папки документов: выбор для просмотра."""
-    builder = InlineKeyboardBuilder()
-    for category in categories:
-        builder.add(
-            InlineKeyboardButton(
-                text=f"🗂 {category.name[:40]}",
-                callback_data=DocListCB(category=uuid_hex(category.id)).pack(),
-            )
-        )
-    builder.row(
-        InlineKeyboardButton(text="📄 Все документы", callback_data=DocListCB().pack()),
-        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack()),
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def document_category_set_keyboard(categories, doc_id: str) -> InlineKeyboardMarkup:
-    """Выбор категории для документа (id документа берётся из состояния диалога)."""
-    builder = InlineKeyboardBuilder()
-    for category in categories:
-        builder.add(
-            InlineKeyboardButton(
-                text=f"🗂 {category.name[:40]}",
-                callback_data=DocCB(action="category_set", value=uuid_hex(category.id)).pack(),
-            )
-        )
-    builder.add(
-        InlineKeyboardButton(
-            text="🚫 Без категории",
-            callback_data=DocCB(action="category_set", value="none").pack(),
-        )
-    )
-    builder.row(
-        InlineKeyboardButton(
-            text="⬅️ Назад", callback_data=DocCB(action="view", doc_id=doc_id).pack()
-        )
-    )
-    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -635,11 +416,6 @@ def document_card_keyboard(doc_id: str, *, can_download: bool) -> InlineKeyboard
         )
     builder.add(
         InlineKeyboardButton(
-            text="🗂 Категория", callback_data=DocCB(action="category", doc_id=doc_id).pack()
-        )
-    )
-    builder.add(
-        InlineKeyboardButton(
             text="🗑 Удалить",
             callback_data=DocCB(action="delete", doc_id=doc_id).pack(),
             style="danger",
@@ -648,7 +424,7 @@ def document_card_keyboard(doc_id: str, *, can_download: bool) -> InlineKeyboard
     builder.row(
         InlineKeyboardButton(text="📄 К списку", callback_data=MenuCB(action="documents").pack())
     )
-    builder.adjust(2, 1, 1)
+    builder.adjust(2, 1)
     return builder.as_markup()
 
 
@@ -687,29 +463,6 @@ def search_results_keyboard(
     builder.row(
         InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
     )
-    return builder.as_markup()
-
-
-def settings_keyboard(categories) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.add(
-        InlineKeyboardButton(
-            text="➕ Новая категория",
-            callback_data=MenuCB(action="category_new").pack(),
-            style="primary",
-        )
-    )
-    for category in categories:
-        builder.add(
-            InlineKeyboardButton(
-                text=f"✏️ {category.name[:30]}",
-                callback_data=MenuCB(action="category_rename", value=category.id.hex).pack(),
-            )
-        )
-    builder.row(
-        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
-    )
-    builder.adjust(1)
     return builder.as_markup()
 
 

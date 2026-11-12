@@ -6,8 +6,7 @@ from datetime import UTC, datetime, time, timedelta
 
 import pytest
 
-from jarvis.domain.enums import TaskBucket, TaskStatus
-from jarvis.repositories.diary import DiaryRepository, DiarySnoozeRepository
+from jarvis.domain.enums import TaskStatus
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import TaskDraft
 from jarvis.services.tasks import TaskService
@@ -19,112 +18,6 @@ pytestmark = pytest.mark.integration
 def _digest_outside_window(settings) -> str:
     now_local = datetime.now(UTC).astimezone(settings.tz)
     return (now_local + timedelta(hours=1)).strftime("%H:%M")
-
-
-async def test_diary_base_reminder_once_and_stops_after_entry(
-    test_settings, session_factory, session
-):
-    fixed = datetime(2026, 11, 6, 13, 31, tzinfo=UTC)  # пятница, 16:31 МСК
-    test_settings.notify_enabled = True
-    test_settings.notify_due_reminders = False
-    test_settings.notify_digest_times = "00:00"
-    test_settings.diary_enabled = True
-    test_settings.diary_reminder_time = "16:30"
-
-    sent: list[tuple[str, object]] = []
-
-    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
-        sent.append((text, reply_markup))
-
-    stats = await run_notifier_once(session_factory, test_settings, _send, now=fixed)
-    assert stats["diary"] == 1
-    assert "дневник" in sent[0][0]
-    assert sent[0][1] is not None
-
-    stats = await run_notifier_once(session_factory, test_settings, _send, now=fixed)
-    assert stats["diary"] == 0
-
-    await DiaryRepository(session).create(111, "Запись", entry_date=fixed.date())
-    await session.commit()
-    stats = await run_notifier_once(session_factory, test_settings, _send, now=fixed)
-    assert stats["diary"] == 0
-
-
-async def test_diary_snooze_reminds_in_an_hour(
-    test_settings, session_factory, session
-):
-    fixed = datetime(2026, 11, 6, 13, 31, tzinfo=UTC)
-    test_settings.notify_enabled = True
-    test_settings.notify_due_reminders = False
-    test_settings.notify_digest_times = "00:00"
-    test_settings.diary_enabled = True
-    test_settings.diary_reminder_time = "16:30"
-
-    sent: list[str] = []
-
-    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
-        sent.append(text)
-
-    await run_notifier_once(session_factory, test_settings, _send, now=fixed)
-    sent.clear()
-    await DiarySnoozeRepository(session).schedule(
-        111, fixed.date(), fixed + timedelta(hours=1)
-    )
-    await session.commit()
-
-    stats = await run_notifier_once(
-        session_factory, test_settings, _send, now=fixed + timedelta(hours=1, minutes=1)
-    )
-    assert stats["diary"] == 1
-    assert any("дневник" in text for text in sent)
-
-    stats = await run_notifier_once(
-        session_factory, test_settings, _send, now=fixed + timedelta(hours=1, minutes=2)
-    )
-    assert stats["diary"] == 0
-
-
-async def test_diary_in_evening_digest_only_when_no_entry(
-    test_settings, session_factory, session
-):
-    fixed = datetime(2026, 11, 6, 19, 0, tzinfo=UTC)  # 22:00 МСК
-    test_settings.notify_enabled = True
-    test_settings.notify_due_reminders = False
-    test_settings.notify_digest_times = "22:00"
-    test_settings.diary_enabled = True
-
-    sent: list[tuple[str, object]] = []
-
-    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
-        sent.append((text, reply_markup))
-
-    stats = await run_notifier_once(session_factory, test_settings, _send, now=fixed)
-    assert stats["digest"] == 1
-    assert any("не сделана" in text for text, _ in sent)
-    assert any(markup is not None for _, markup in sent)
-
-
-async def test_diary_evening_digest_has_no_line_after_entry(
-    test_settings, session_factory, session
-):
-    fixed = datetime(2026, 11, 6, 19, 0, tzinfo=UTC)
-    test_settings.notify_enabled = True
-    test_settings.notify_due_reminders = False
-    test_settings.notify_digest_times = "22:00"
-    test_settings.diary_enabled = True
-
-    await DiaryRepository(session).create(111, "Уже записал", entry_date=fixed.date())
-    await session.commit()
-
-    sent: list[tuple[str, object]] = []
-
-    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
-        sent.append((text, reply_markup))
-
-    stats = await run_notifier_once(session_factory, test_settings, _send, now=fixed)
-    assert stats["digest"] == 1
-    assert all("не сделана" not in text for text, _ in sent)
-    assert all(markup is None for _, markup in sent)
 
 
 async def test_due_reminder_sent_once(test_settings, session_factory, session):
@@ -282,7 +175,7 @@ async def test_digest_sent_once_per_day(test_settings, session_factory, session)
     test_settings.notify_digest_times = (now_local - timedelta(minutes=1)).strftime("%H:%M")
 
     await TaskService(session).create_from_draft(
-        TaskDraft(title="Задача на сегодня", bucket=TaskBucket.TODAY)
+        TaskDraft(title="Задача на сегодня", due_at=datetime.now(UTC))
     )
     await session.commit()
 
@@ -338,7 +231,9 @@ async def test_evening_digest_shows_closed_remaining_and_tomorrow(
     service = TaskService(session)
     done_id = await service.create_from_draft(TaskDraft(title="Закрытая сегодня"))
     await service.apply_update(done_id, {"status": TaskStatus.DONE})
-    await service.create_from_draft(TaskDraft(title="Осталась на сегодня", bucket=TaskBucket.TODAY))
+    await service.create_from_draft(
+        TaskDraft(title="Осталась на сегодня", due_at=datetime.now(UTC))
+    )
     await service.create_from_draft(
         TaskDraft(title="Задача на завтра", due_at=datetime.now(UTC) + timedelta(days=1))
     )

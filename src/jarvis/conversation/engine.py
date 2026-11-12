@@ -37,18 +37,13 @@ from jarvis.domain.enums import (
     KnowledgeType,
     PendingOpType,
     Sensitivity,
-    TaskBucket,
-    TaskPriority,
 )
 from jarvis.logging_setup import get_correlation_id
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
-from jarvis.repositories.diary import DiaryRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
-from jarvis.services.catalog import CatalogService
 from jarvis.services.confirmation import ConfirmationService
 from jarvis.services.drafts import KnowledgeDraft, TaskDraft
 from jarvis.services.improvements import ImprovementService
@@ -129,8 +124,6 @@ class ConversationEngine:
         self._search_provider = search_provider
         self._store = ConversationStore(ConversationRepository(session), settings)
         self._confirmation = ConfirmationService(session, settings)
-        self._catalog = CatalogService(session)
-        self._projects = ProjectRepository(session)
         self._search = SearchService(session)
         self._improvements = ImprovementService(session, settings)
 
@@ -165,29 +158,6 @@ class ConversationEngine:
                 "Я всё ещё жду файл по начатому сценарию. Пришлите документ, "
                 "отправьте /cancel для отмены или задайте вопрос командой /help.",
                 awaiting_document=True,
-            )
-
-        if state is not None and state.flow == Flow.CREATE_CATEGORY:
-            await self._store.clear(telegram_user_id)
-            return await self._propose_payload(
-                telegram_user_id, PendingOpType.CREATE_CATEGORY, {"name": text[:120]}
-            )
-
-        if state is not None and state.flow == Flow.CREATE_PROJECT:
-            await self._store.clear(telegram_user_id)
-            return await self._propose_payload(
-                telegram_user_id, PendingOpType.CREATE_PROJECT, {"name": text[:200]}
-            )
-
-        if state is not None and state.flow == Flow.EDIT_CATEGORY:
-            category_id = state.data.get("category_id")
-            await self._store.clear(telegram_user_id)
-            if not category_id:
-                return EngineOutcome("Категория потерялась, начните заново из /settings.")
-            return await self._propose_payload(
-                telegram_user_id,
-                PendingOpType.RENAME_CATEGORY,
-                {"category_id": category_id, "new_name": text[:120]},
             )
 
         if state is not None and state.flow == Flow.EDIT_TASK_DUE:
@@ -231,28 +201,6 @@ class ConversationEngine:
                 PendingOpType.UPDATE_COMMENT,
                 {"comment_id": comment_id, "task_id": task_id, "content": text[:4000]},
             )
-
-        if state is not None and state.flow == Flow.DIARY_WAIT:
-            await self._store.clear(telegram_user_id)
-            moment = datetime.now(UTC)
-            today = moment.astimezone(self._settings.tz).date()
-            entry = await DiaryRepository(self._session).create(
-                telegram_user_id, text[:4000], entry_date=today, now=moment
-            )
-            stamp = entry.created_at.astimezone(self._settings.tz).strftime("%H:%M")
-            return EngineOutcome(f"📔 Записано в {stamp}.", ui_actions=["diary"])
-
-        if state is not None and state.flow == Flow.DIARY_EDIT_WAIT:
-            entry_id = str(state.data.get("entry_id", ""))
-            await self._store.clear(telegram_user_id)
-            if not entry_id:
-                return EngineOutcome("Запись потерялась, откройте дневник заново.")
-            repo = DiaryRepository(self._session)
-            entry = await repo.get(telegram_user_id, uuid.UUID(entry_id))
-            if entry is None:
-                return EngineOutcome("Запись не найдена.", menu=self._menu_flag())
-            await repo.update_content(entry, text[:4000])
-            return EngineOutcome("📔 Запись обновлена.", ui_actions=["diary"])
 
         # --- Stage 3: AI-агент ---
         # Весь текст уходит агенту (кроме пошаговых сценариев выше и ввода
@@ -356,19 +304,6 @@ class ConversationEngine:
             view = str(interpretation.entities.get("view") or "week").strip()
             return await self._show_task_list(view)
 
-        if intent == "create_project":
-            name = str(interpretation.entities.get("name") or "").strip()
-            if not name:
-                return EngineOutcome("Как назвать проект?")
-            return await self._propose_payload(
-                telegram_user_id,
-                PendingOpType.CREATE_PROJECT,
-                {
-                    "name": name[:200],
-                    "description": interpretation.entities.get("description"),
-                },
-            )
-
         if intent in _KNOWLEDGE_INTENTS:
             return await self._propose_knowledge(telegram_user_id, text, interpretation, source)
 
@@ -417,23 +352,11 @@ class ConversationEngine:
                 "(например, «22.10.2026» или «в пятницу»).",
             )
 
-        category = await self._catalog.resolve_name(entities.get("category"))
-        category_name = str(entities.get("category") or "").strip() or None
-        project_name = str(entities.get("project") or "").strip() or None
-        bucket = self._parse_bucket(entities.get("bucket"))
-        priority = self._parse_priority(entities.get("priority"))
-
         draft = TaskDraft(
             title=title,
             description=entities.get("description"),
             original_text=text,
             due_at=due_at,
-            bucket=bucket,
-            priority=priority,
-            category_id=category.id if category else None,
-            # Категория названа, но её ещё нет: привяжем по имени — создастся при подтверждении.
-            category_name=category_name if category is None else None,
-            project_name=project_name,
         )
         return await self._propose(telegram_user_id, PendingOpType.CREATE_TASK, draft)
 
@@ -511,10 +434,7 @@ class ConversationEngine:
             await self._store.set(
                 telegram_user_id,
                 Flow.FORCE_SAVE_PENDING,
-                data={
-                    "text": text,
-                    "project": str(entities.get("project") or "").strip() or None,
-                },
+                data={"text": text},
             )
             return EngineOutcome(
                 "⚠️ Похоже, в сообщении есть секрет (пароль, токен или ключ).\n\n"
@@ -537,8 +457,6 @@ class ConversationEngine:
             KnowledgeType(kind) if kind in {t.value for t in KnowledgeType} else KnowledgeType.NOTE
         )
         sensitivity = Sensitivity.SENSITIVE if "sensitive" in hints else Sensitivity.NORMAL
-        category = await self._catalog.resolve_name(entities.get("category"))
-        project_name = str(entities.get("project") or "").strip() or None
 
         draft = KnowledgeDraft(
             type=knowledge_type,
@@ -547,8 +465,6 @@ class ConversationEngine:
             content=content,
             source_type=source,
             original_text=text,
-            category_id=category.id if category else None,
-            project_name=project_name,
             sensitivity=sensitivity,
         )
         return await self._propose(telegram_user_id, PendingOpType.CREATE_KNOWLEDGE, draft)
@@ -558,15 +474,13 @@ class ConversationEngine:
     ) -> EngineOutcome | None:
         """Экран, который попросил открыть агент (параметры уже провалидированы)."""
         if name == "tasks":
-            if params.get("category"):
-                return await self._show_tasks_in_category(str(params["category"]))
             if params.get("on_date"):
                 return await self._show_tasks_on_date(params["on_date"])
             return await self._show_task_list(str(params.get("view") or "week"))
         if name == "search":
             return await self._do_search(telegram_user_id, str(params.get("query") or ""), page=0)
         if name == "documents":
-            return await self._show_documents(params.get("category"))
+            return await self._show_documents()
         if name == "knowledge":
             return await self._show_knowledge_list()
         if name == "card":
@@ -608,47 +522,18 @@ class ConversationEngine:
             day=day,
         )
 
-    async def _show_tasks_in_category(self, name: str, page: int = 0) -> EngineOutcome:
-        """Список задач категории («покажи задачи в категории X»)."""
-        category = await self._catalog.resolve_name(name)
-        if category is None:
-            return EngineOutcome(
-                f"Категория «{html_escape(name)}» не найдена.", menu=self._menu_flag()
-            )
-        tasks = await TaskRepository(self._session).list_by_category(
-            category.id, limit=TASK_LIST_LIMIT, offset=page * TASK_LIST_LIMIT
-        )
-        return self._render_task_list(
-            f"🗂 {html_escape(category.name)}",
-            tasks,
-            view="category",
-            page=page,
-            value=str(category.id),
-        )
-
-    async def _show_documents(self, category_name: str | None) -> EngineOutcome:
+    async def _show_documents(self) -> EngineOutcome:
         """Список документов («покажи список документов», экран агента documents)."""
-        category = None
-        if category_name:
-            category = await self._catalog.resolve_name(str(category_name))
-            if category is None:
-                return EngineOutcome(
-                    f"Категория «{html_escape(str(category_name))}» не найдена.",
-                    menu=self._menu_flag(),
-                )
         documents = await DocumentRepository(self._session).list_active(
             limit=LIST_PAGE_LIMIT,
-            category_id=category.id if category else None,
         )
-        title = f"🗂 <b>{html_escape(category.name)}</b>" if category else "📄 <b>Документы</b>"
+        title = "📄 <b>Документы</b>"
         if not documents:
-            if category is None:
-                return EngineOutcome(
-                    "📄 Пока нет документов.\n\nОтправьте файл одним сообщением — "
-                    "я зашифрую его и предложу сохранить.",
-                    menu=self._menu_flag(),
-                )
-            return EngineOutcome(f"{title}\n\nПусто.", menu=self._menu_flag())
+            return EngineOutcome(
+                "📄 Пока нет документов.\n\nОтправьте файл одним сообщением — "
+                "я зашифрую его и предложу сохранить.",
+                menu=self._menu_flag(),
+            )
         lines = [title, ""]
         for index, document in enumerate(documents, start=1):
             lines.append(f"{index}. {html_escape(document.title)}")
@@ -1026,8 +911,6 @@ class ConversationEngine:
                 draft["title"] = text.strip()[:300]
             if entities.get("due_at"):
                 draft["due_at"] = entities["due_at"]
-            if entities.get("bucket"):
-                draft["bucket"] = entities["bucket"]
 
         if not draft:
             return EngineOutcome(
@@ -1117,13 +1000,9 @@ class ConversationEngine:
         draft: dict[str, Any] | None = None,
         session_id: str | None = None,
     ) -> InterpreterContext:
-        categories = [category.name for category in await self._catalog.list_categories()]
-        projects = [project.name for project in await self._projects.list_active(limit=50)]
         return InterpreterContext(
             now=datetime.now(UTC).astimezone(self._settings.tz),
             tz_name=self._settings.app_timezone,
-            categories=categories,
-            projects=projects,
             draft=draft,
             session_id=session_id,
         )
@@ -1134,7 +1013,7 @@ class ConversationEngine:
             return EngineOutcome(
                 "AI-провайдер не настроен, поэтому на вопросы я ответить не могу. "
                 "Поиск по базе работает: /search. Настройте AI_PROVIDER, чтобы я "
-                "понимал задачи, сроки и категории.",
+                "понимал задачи и сроки.",
                 menu=self._menu_flag(),
             )
         draft = KnowledgeDraft(
@@ -1147,7 +1026,7 @@ class ConversationEngine:
         outcome = await self._propose(telegram_user_id, PendingOpType.CREATE_KNOWLEDGE, draft)
         outcome.text += (
             "\n\n<i>AI-провайдер не настроен: сохраняю сообщение как заметку. "
-            "После настройки AI я буду распознавать задачи и категории.</i>"
+            "После настройки AI я буду распознавать задачи и сроки.</i>"
         )
         return outcome
 
@@ -1169,24 +1048,6 @@ class ConversationEngine:
         except ValueError:
             return None
         return parsed
-
-    @staticmethod
-    def _parse_bucket(value: Any) -> TaskBucket | None:
-        if not value:
-            return None
-        try:
-            return TaskBucket(str(value))
-        except ValueError:
-            return None
-
-    @staticmethod
-    def _parse_priority(value: Any) -> TaskPriority:
-        if not value:
-            return TaskPriority.NORMAL
-        try:
-            return TaskPriority(str(value))
-        except ValueError:
-            return TaskPriority.NORMAL
 
     @staticmethod
     def _looks_like_secret(entities: dict[str, Any]) -> bool:

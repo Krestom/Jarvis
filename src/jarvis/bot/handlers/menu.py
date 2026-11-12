@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
@@ -13,7 +13,6 @@ from jarvis.config.settings import Settings
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
 from jarvis.repositories.conversation import ConversationRepository
-from jarvis.repositories.projects import ProjectRepository
 
 
 def MenuCBFilter(action: str):  # noqa: N802 - читаемо на месте использования
@@ -32,26 +31,6 @@ async def _edit_or_send(callback: CallbackQuery, text: str, markup, *, with_menu
         await message.edit_text(text, reply_markup=reply_markup)
     except Exception:  # noqa: BLE001 - старое сообщение могло быть недоступно для правки
         await message.answer(text, reply_markup=reply_markup)
-
-
-async def send_settings(
-    message: Message, session: AsyncSession, settings: Settings, *, edit: bool = False
-) -> None:
-    from jarvis.bot.handlers.render import send_or_edit
-    from jarvis.bot.keyboards import settings_keyboard
-    from jarvis.services.catalog import CatalogService
-
-    categories = await CatalogService(session).list_categories()
-    lines = [
-        "⚙️ <b>Настройки</b>",
-        f"Часовой пояс: <code>{settings.app_timezone}</code>",
-        f"Срок подтверждения операций: {settings.pending_operation_ttl_minutes} мин",
-        f"Состояние сценариев живёт: {settings.conversation_state_ttl_hours} ч",
-        "\n<b>Категории</b> (нажмите, чтобы переименовать):",
-    ]
-    await send_or_edit(
-        message, "\n".join(lines), markup=settings_keyboard(categories), edit=edit
-    )
 
 
 async def menu_main(callback: CallbackQuery) -> None:
@@ -92,15 +71,6 @@ async def menu_documents(callback: CallbackQuery, session: AsyncSession) -> None
     await send_documents_list(callback.message, session, page=0, edit=True)
 
 
-async def menu_diary(
-    callback: CallbackQuery, session: AsyncSession, settings: Settings
-) -> None:
-    from jarvis.bot.handlers.diary import send_diary_day
-
-    await callback.answer()
-    await send_diary_day(callback.message, session, settings, edit=True)
-
-
 async def menu_secrets(
     callback: CallbackQuery, session: AsyncSession, settings: Settings
 ) -> None:
@@ -119,50 +89,6 @@ async def menu_secret_new(
     await start_secret_flow(callback.message, session, settings, ai)
 
 
-async def menu_projects(callback: CallbackQuery, session: AsyncSession) -> None:
-    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
-    from jarvis.bot.handlers.render import send_or_edit
-
-    projects = await ProjectRepository(session).list_active(limit=30)
-    lines = ["🗂 <b>Проекты</b>"]
-    if projects:
-        lines.extend(f"• {project.name}" for project in projects)
-    else:
-        lines.append("Пока нет проектов. Создайте первый кнопкой ниже.")
-    builder = [
-        [
-            InlineKeyboardButton(
-                text="➕ Новый проект",
-                callback_data=MenuCB(action="project_new").pack(),
-                style="primary",
-            )
-        ],
-        [InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())],
-    ]
-    await callback.answer()
-    await send_or_edit(
-        callback.message,
-        "\n".join(lines),
-        markup=InlineKeyboardMarkup(inline_keyboard=builder),
-        edit=True,
-    )
-
-
-async def menu_settings(
-    callback: CallbackQuery, session: AsyncSession, settings: Settings
-) -> None:
-    await callback.answer()
-    await send_settings(callback.message, session, settings, edit=True)
-
-
-async def menu_categories(
-    callback: CallbackQuery, session: AsyncSession, settings: Settings
-) -> None:
-    await callback.answer()
-    await send_settings(callback.message, session, settings, edit=True)
-
-
 async def menu_cancel_flow(
     callback: CallbackQuery, session: AsyncSession, settings: Settings
 ) -> None:
@@ -170,38 +96,6 @@ async def menu_cancel_flow(
     await store.clear(callback.from_user.id)
     await callback.answer("Сценарий отменён")
     await _edit_or_send(callback, "Сценарий отменён.", markup=None, with_menu=True)
-
-
-async def menu_category_new(
-    callback: CallbackQuery, session: AsyncSession, settings: Settings
-) -> None:
-    store = ConversationStore(ConversationRepository(session), settings)
-    await store.set(callback.from_user.id, Flow.CREATE_CATEGORY)
-    await callback.answer()
-    await callback.message.answer("Как назвать новую категорию?")
-
-
-async def menu_category_rename(
-    callback: CallbackQuery, session: AsyncSession, settings: Settings, callback_data: MenuCB
-) -> None:
-    if not callback_data.value:
-        await callback.answer("Не понял, какую категорию менять", show_alert=True)
-        return
-    store = ConversationStore(ConversationRepository(session), settings)
-    await store.set(
-        callback.from_user.id, Flow.EDIT_CATEGORY, data={"category_id": callback_data.value}
-    )
-    await callback.answer()
-    await callback.message.answer("Напишите новое название категории.")
-
-
-async def menu_project_new(
-    callback: CallbackQuery, session: AsyncSession, settings: Settings
-) -> None:
-    store = ConversationStore(ConversationRepository(session), settings)
-    await store.set(callback.from_user.id, Flow.CREATE_PROJECT)
-    await callback.answer()
-    await callback.message.answer("Как назвать проект?")
 
 
 async def menu_force_save(
@@ -237,7 +131,6 @@ async def menu_force_save(
         content=text,
         source_type=KnowledgeSource.TEXT,
         original_text=text,
-        project_name=str(state.data.get("project") or "").strip() or None,
         sensitivity=Sensitivity.SENSITIVE,
     )
     await propose_and_send(
@@ -261,15 +154,8 @@ def build_router() -> Router:
     router.callback_query.register(menu_tasks, MenuCBFilter("tasks"))
     router.callback_query.register(menu_knowledge, MenuCBFilter("knowledge"))
     router.callback_query.register(menu_documents, MenuCBFilter("documents"))
-    router.callback_query.register(menu_diary, MenuCBFilter("diary"))
     router.callback_query.register(menu_secrets, MenuCBFilter("secrets"))
     router.callback_query.register(menu_secret_new, MenuCBFilter("secret_new"))
-    router.callback_query.register(menu_projects, MenuCBFilter("projects"))
-    router.callback_query.register(menu_settings, MenuCBFilter("settings"))
-    router.callback_query.register(menu_categories, MenuCBFilter("categories"))
     router.callback_query.register(menu_cancel_flow, MenuCBFilter("cancel_flow"))
-    router.callback_query.register(menu_category_new, MenuCBFilter("category_new"))
-    router.callback_query.register(menu_category_rename, MenuCBFilter("category_rename"))
-    router.callback_query.register(menu_project_new, MenuCBFilter("project_new"))
     router.callback_query.register(menu_force_save, MenuCBFilter("force_save"))
     return router

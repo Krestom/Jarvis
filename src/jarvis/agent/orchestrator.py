@@ -30,7 +30,6 @@ from jarvis.config.settings import Settings
 from jarvis.conversation.state import ConversationStore
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.research import create_search_provider
 from jarvis.research.provider import WebSearchProvider
@@ -346,9 +345,6 @@ class AgentService:
                     clean["on_date"] = date.fromisoformat(on_date)
                 except ValueError:
                     return None
-            category = str(params.get("category") or "").strip()
-            if category:
-                clean["category"] = category[:120]
             return ("tasks", clean)
         if ui.name == "search":
             query = str(params.get("query") or "").strip()
@@ -356,11 +352,7 @@ class AgentService:
                 return None
             return ("search", {"query": query[:200]})
         if ui.name == "documents":
-            clean: dict = {}
-            category = str(params.get("category") or "").strip()
-            if category:
-                clean["category"] = category[:120]
-            return ("documents", clean)
+            return ("documents", {})
         if ui.name == "knowledge":
             return ("knowledge", {})
         if ui.name == "card":
@@ -401,10 +393,6 @@ class AgentService:
             item = await KnowledgeRepository(self._session).get(entity_id)
             if item is not None:
                 return EntityCandidate(kind="knowledge", id=item.id, title=item.title)
-        elif kind == "project":
-            project = await ProjectRepository(self._session).get(entity_id)
-            if project is not None:
-                return EntityCandidate(kind="project", id=project.id, title=project.name)
         return None
 
     async def _stored_context(self, telegram_user_id: int) -> dict:
@@ -466,7 +454,6 @@ def _finding(tool_name: str, result: ToolResult) -> str:
         label = (
             data.get("view")
             or data.get("date")
-            or data.get("category")
             or "без фильтра"
         )
         return f"задачи ({label}): " + ", ".join(item["title"] for item in items[:5])

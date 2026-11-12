@@ -125,7 +125,7 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
    - эвристики (`heuristics.py`, `dates.py`) обрабатывают очевидные случаи
      («найди …», «завтра») без AI;
    - иначе текст уходит в `AIProvider.interpret` с минимальным контекстом
-     (время, таймзона, имена категорий/проектов);
+     (время, таймзона, черновик операции);
    - по `intent` формируется черновик (`services/drafts.py`) или уточняющий вопрос.
    Для ответов-подсказок (smalltalk/unknown) модель может вернуть типизированный
    `ui_request` (`quick_actions`): backend собирает кнопки строго из allow-list
@@ -164,19 +164,18 @@ Jarvis — личный Telegram-first Knowledge OS: заметки, задач�
 
 Таблицы из `src/jarvis/db/models.py` (миграции Alembic: `8e374da5e984` — initial
 schema, `19d82c1a6e02` — improvement backlog, `1905d3d87297` — комментарии задач,
-`02df923727b6` — журнал чата, `aa624e0c3fc4` — журнал уведомлений,
-`b7f3c1a2d4e6` — drop entity_links). Enum-поля хранятся как VARCHAR без
-CHECK-ограничений — значения валидируются на уровне Python.
+`aa624e0c3fc4` — журнал уведомлений, `b7f3c1a2d4e6` — drop entity_links,
+`9c4f1e2a7b6d` — удаление дневника, проектов, категорий и журнала чата).
+Enum-поля хранятся как VARCHAR без CHECK-ограничений — значения валидируются
+на уровне Python.
 
 | Таблица | Назначение | Ключевые поля |
 |---|---|---|
-| `categories` | Иерархия категорий | `name` (unique), `parent_id`, `sort_order` |
-| `projects` | Проекты | `name` (unique), `status`, `category_id`, `meta` |
 | `knowledge_items` | Заметки/знания | `type`, `title`, `summary`, `content`, `source_type`, `original_text`, `sensitivity`, `status`, `search_vector` (GIN, russian) |
-| `tasks` | Задачи | `title`, `description`, `status`, `priority`, `bucket`, `due_at`, `completed_at`, `search_vector` (GIN, russian) |
+| `tasks` | Задачи | `title`, `description`, `status`, `due_at`, `completed_at`, `search_vector` (GIN, russian) |
 | `task_comments` | Комментарии к задачам | `task_id` (FK, CASCADE), `content` |
 | `documents` | Метаданные документов (содержимое — только на диске, зашифровано) | `title`, `document_type`, `sensitivity`, `status` (pending/active), `storage_key` (unique), `original_filename`, `mime_type`, `size_bytes`, `sha256`, `encryption_version` |
-| `secrets` | Секреты (значение зашифровано) | `name` (unique), `secret_type`, `encrypted_value` (blob), `key_version`, `project_id`, `category_id` |
+| `secrets` | Секреты (значение зашифровано) | `name` (unique), `secret_type`, `encrypted_value` (blob), `key_version` |
 | `entity_links` | ~~Полиморфные связи сущностей~~ — удалено (фича «Связи»: создать связь было неоткуда, таблица всегда пустая; миграция `b7f3c1a2d4e6`) |
 | `conversation_states` | Краткосрочный контекст сценария | PK `telegram_user_id`, `flow`, `step`, `data` (JSONB), `pending_operation_id`, `expires_at`; при `flow='agent_context'` в `data` лежат выбранная сущность агента, кандидаты и метрики последнего запроса |
 | `pending_operations` | Предложенные значимые изменения | `telegram_user_id`, `operation_type`, `payload` (JSONB), `status`, `expires_at`, `resolved_at`, `result` |
@@ -190,33 +189,22 @@ CHECK-ограничений — значения валидируются на 
 (у документов файл стирается из хранилища); секреты и неподтверждённые
 документы удаляются жёстко (см. раздел 6).
 
-## 5. Политика временных групп задач
+## 5. Календарные списки задач
 
-Группа — это **намерение**, а не дата (см. `src/jarvis/domain/buckets.py`):
+У задачи есть только срок `due_at` (tz-aware) и статус. Отдельной
+группы-намерения (`bucket`) больше нет.
 
-- `tasks.bucket` принимает `today`, `week`, `long_term`, `someday` или `NULL`
-  («без группы»). Это то, что пользователь сказал, а не вычисленный календарь.
-- `tasks.due_at` — отдельный опциональный tz-aware момент срока.
-- «Сегодня» **никогда не сохраняется как дата**: списки «Сегодня» и
-  «На этой неделе» вычисляются динамически по `APP_TIMEZONE` в момент запроса
-  (`today_window`/`week_window`, `repositories/tasks.py`).
+Списки вычисляются в момент запроса по `APP_TIMEZONE`
+(`today_window`/`week_window`, `repositories/tasks.py`):
 
-Правила членства (код `repositories/tasks.py`, `TaskService.list_view`):
+- **today** — `due_at < конец сегодняшнего дня` (включая просроченные);
+- **week** — `due_at` попадает в интервал «сегодня…воскресенье»;
+- **no_group** — `due_at IS NULL`;
+- **all** — все незавершённые задачи.
 
-- **today**: `bucket='today'` **или** `due_at < конец сегодняшнего дня`
-  (включая просроченные);
-- **week**: `due_at` попадает в интервал «завтра…воскресенье» **или**
-  `bucket='week'` без попадания в «сегодня»;
-- **long_term**: `bucket='long_term'` **или** `due_at` за пределами текущей недели;
-- **someday**: `bucket='someday'`;
-- **no_group**: без группы и без `due_at`; **inbox**: `status='inbox'`;
-- **done**: `status='done'`.
-
-Неделя — ISO (понедельник..воскресенье) в таймзоне пользователя. Задача,
-созданная «на сегодня», завтра останется с `bucket='today'`, но её реальное
-членство в списках будет определяться календарём и `due_at`. Человеческие
-формулировки дат («завтра», «в пятницу») разбирает `conversation/dates.py`
-до записи в `due_at`.
+Неделя — ISO (понедельник..воскресенье) в таймзоне пользователя.
+Человеческие формулировки дат («завтра», «в пятницу») разбирает
+`conversation/dates.py` до записи в `due_at`.
 
 ## 6. Жизненный цикл документа
 
@@ -230,7 +218,7 @@ CHECK-ограничений — значения валидируются на 
    `{DOCUMENT_STORAGE_PATH}/_staging/{storage_key}.enc`; в БД создаётся запись
    со `status='pending'`. `storage_key` — случайные 24 байта hex, не имя файла.
 3. **Подтверждение.** Пользователь получает превью `SAVE_DOCUMENT` (название,
-   тип, категория, чувствительность) с кнопками. «Применить» → `confirm_save`:
+   тип, чувствительность) с кнопками. «Применить» → `confirm_save`:
    файл перемещается (`promote`) в основное хранилище
    (`{root}/{первые 2 hex}/{key}.bin`), запись становится `active`.
    Повторное подтверждение идемпотентно: уже `active` документ возвращается как есть.
@@ -251,8 +239,7 @@ MCP (`src/jarvis/mcp/`) — отдельный процесс (`python -m jarvis
 (streamable HTTP). Политика — **read-only**:
 
 - инструменты: `search_knowledge`, `search_instructions`, `get_knowledge_item`,
-  `get_project_context`, `search_tasks`
-  (`src/jarvis/mcp/tools.py`);
+  `search_tasks` (`src/jarvis/mcp/tools.py`);
 - каждый вызов проходит через те же репозитории и тот же фильтр
   чувствительности, что и Telegram-бот (`allowed_sensitivities` в
   `src/jarvis/services/knowledge.py`): `MCP_INCLUDE_SENSITIVE=true` (решение
@@ -285,4 +272,4 @@ MCP (`src/jarvis/mcp/`) — отдельный процесс (`python -m jarvis
 
 Дополнительно: health-сервер (`/healthz`, проверка `SELECT 1`) поднимается в том
 же процессе на `HEALTH_HOST:HEALTH_PORT`; при старте приложение ждёт БД
-(15 попыток × 2 с) и засеивает стартовые категории (`CatalogService.ensure_defaults`).
+(15 попыток × 2 с).

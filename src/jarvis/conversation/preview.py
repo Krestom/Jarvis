@@ -14,11 +14,8 @@ from jarvis.domain.enums import (
     KnowledgeType,
     PendingOpType,
     Sensitivity,
-    TaskBucket,
-    TaskPriority,
     TaskStatus,
 )
-from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.tasks import TaskRepository
 
@@ -27,26 +24,11 @@ MONTHS_RU = [
     "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ]
 
-BUCKET_LABELS = {
-    TaskBucket.TODAY: "Сегодня",
-    TaskBucket.WEEK: "На этой неделе",
-    TaskBucket.LONG_TERM: "Долгосрочные",
-    TaskBucket.SOMEDAY: "Когда-нибудь",
-}
-
-PRIORITY_LABELS = {
-    TaskPriority.LOW: "низкий",
-    TaskPriority.NORMAL: "обычный",
-    TaskPriority.HIGH: "высокий",
-    TaskPriority.URGENT: "срочный",
-}
-
 KNOWLEDGE_TYPE_LABELS = {
     KnowledgeType.NOTE: "заметка",
     KnowledgeType.REFERENCE: "справочная информация",
     KnowledgeType.INSTRUCTION: "инструкция",
     KnowledgeType.DECISION: "решение",
-    KnowledgeType.PROJECT_CONTEXT: "контекст проекта",
 }
 
 SENSITIVITY_LABELS = {
@@ -67,7 +49,6 @@ DOCUMENT_TYPE_LABELS = {
 }
 
 STATUS_LABELS = {
-    TaskStatus.INBOX: "входящие",
     TaskStatus.TODO: "к выполнению",
     TaskStatus.IN_PROGRESS: "в работе",
     TaskStatus.WAITING: "ожидание",
@@ -84,9 +65,6 @@ OPERATION_TITLES = {
     PendingOpType.CREATE_KNOWLEDGE: "Сохранить запись?",
     PendingOpType.UPDATE_KNOWLEDGE: "Изменить запись?",
     PendingOpType.DELETE_KNOWLEDGE: "Удалить запись?",
-    PendingOpType.CREATE_CATEGORY: "Создать категорию?",
-    PendingOpType.CREATE_PROJECT: "Создать проект?",
-    PendingOpType.RENAME_CATEGORY: "Переименовать категорию?",
     PendingOpType.SAVE_DOCUMENT: "Сохранить документ?",
     PendingOpType.UPDATE_DOCUMENT: "Обновить документ?",
     PendingOpType.DELETE_DOCUMENT: "Удалить документ?",
@@ -108,13 +86,8 @@ def fmt_dt_local(dt: datetime, tz: ZoneInfo) -> str:
 TASK_VIEW_TITLES = {
     "today": "🔸 Задачи на сегодня",
     "week": "📆 На этой неделе",
-    "month": "📅 В этом месяце",
-    "long_term": "🗓 Долгосрочные",
-    "someday": "💭 Когда-нибудь",
     "no_group": "📥 Без срока",
-    "inbox": "🌀 Inbox",
     "all": "📋 Все задачи",
-    "done": "✅ Выполненные",
 }
 
 
@@ -161,10 +134,6 @@ def task_line(
                 details.append(f"до {due_local:%H:%M}")
         else:
             details.append("до " + fmt_dt_local(due_local, tz))
-    if task.bucket is not None:
-        details.append(BUCKET_LABELS.get(TaskBucket(task.bucket), str(task.bucket)))
-    if task.priority in (TaskPriority.HIGH, TaskPriority.URGENT):
-        details.append(PRIORITY_LABELS.get(TaskPriority(task.priority), str(task.priority)))
     if details:
         line += f" <i>({' · '.join(html.escape(part) for part in details)})</i>"
     return line
@@ -195,35 +164,6 @@ def _line(label: str, value: str | None) -> str:
     return f"<b>{html.escape(label)}:</b> {html.escape(value)}\n"
 
 
-async def _category_name(session: AsyncSession, category_id) -> str | None:
-    if not category_id:
-        return None
-    try:
-        category = await CategoryRepository(session).get(uuid.UUID(str(category_id)))
-    except (ValueError, AttributeError):
-        return None
-    return category.name if category else None
-
-
-async def _project_label(session: AsyncSession, payload: dict) -> str | None:
-    """Название проекта для превью; помечаем проект, который будет создан."""
-    from jarvis.repositories.projects import ProjectRepository
-
-    repo = ProjectRepository(session)
-    project_id = payload.get("project_id")
-    if project_id:
-        try:
-            project = await repo.get(uuid.UUID(str(project_id)))
-        except (ValueError, AttributeError):
-            project = None
-        return project.name if project else None
-    name = str(payload.get("project_name") or "").strip()
-    if not name:
-        return None
-    existing = await repo.find_by_name(name)
-    return name if existing else f"{name} (будет создан)"
-
-
 async def render_preview(
     session: AsyncSession,
     operation_type: PendingOpType,
@@ -237,10 +177,6 @@ async def render_preview(
     if operation_type == PendingOpType.CREATE_TASK:
         lines.append(_line("Название", payload.get("title")))
         lines.append(_line("Описание", payload.get("description")))
-        bucket = payload.get("bucket")
-        if bucket:
-            label = BUCKET_LABELS.get(TaskBucket(bucket))
-            lines.append(_line("Группа", label))
         due_raw = payload.get("due_at")
         due = None
         if due_raw:
@@ -250,14 +186,6 @@ async def render_preview(
                 due = None
         if due is not None:
             lines.append(_line("Дедлайн", fmt_dt_local(due, tz)))
-        priority = payload.get("priority")
-        if priority and priority != TaskPriority.NORMAL.value:
-            lines.append(_line("Приоритет", PRIORITY_LABELS.get(TaskPriority(priority), priority)))
-        category = await _category_name(session, payload.get("category_id")) or (
-            payload.get("category_name")
-        )
-        lines.append(_line("Категория", category))
-        lines.append(_line("Проект", await _project_label(session, payload)))
 
     elif operation_type == PendingOpType.UPDATE_TASK:
         changes = payload.get("changes", {})
@@ -303,9 +231,6 @@ async def render_preview(
         summary = payload.get("summary")
         if summary:
             lines.append(_line("Сводка", summary))
-        category = await _category_name(session, payload.get("category_id"))
-        lines.append(_line("Категория", category))
-        lines.append(_line("Проект", await _project_label(session, payload)))
         sensitivity = payload.get("sensitivity", Sensitivity.NORMAL.value)
         if sensitivity != Sensitivity.NORMAL.value:
             lines.append(
@@ -332,8 +257,6 @@ async def render_preview(
         lines.append(_line("Название", payload.get("title")))
         dtype = payload.get("document_type", DocumentType.OTHER.value)
         lines.append(_line("Тип", DOCUMENT_TYPE_LABELS.get(DocumentType(dtype), dtype)))
-        category = await _category_name(session, payload.get("category_id"))
-        lines.append(_line("Категория", category))
         sensitivity = payload.get("sensitivity", Sensitivity.SENSITIVE.value)
         lines.append(
             _line("Чувствительность", SENSITIVITY_LABELS.get(Sensitivity(sensitivity)))
@@ -356,10 +279,6 @@ async def render_preview(
                 lines.append(_line("Название", f"{html.escape(document.title)} → {new_title}"))
             else:
                 lines.append(_line("Документ", document.title))
-            if "category_id" in payload:
-                old = await _category_name(session, document.category_id)
-                new = await _category_name(session, payload.get("category_id"))
-                lines.append(_line("Категория", f"{old or 'нет'} → {new or 'нет'}"))
             if payload.get("sensitivity"):
                 old = SENSITIVITY_LABELS.get(document.sensitivity, document.sensitivity.value)
                 new = SENSITIVITY_LABELS.get(
@@ -375,18 +294,6 @@ async def render_preview(
     ):
         entity_id = payload.get("entity_id")
         lines.append(await _render_delete_target(session, operation_type, entity_id))
-
-    elif operation_type == PendingOpType.CREATE_CATEGORY:
-        lines.append(_line("Название", payload.get("name")))
-
-    elif operation_type == PendingOpType.CREATE_PROJECT:
-        lines.append(_line("Название", payload.get("name")))
-        lines.append(_line("Описание", payload.get("description")))
-
-    elif operation_type == PendingOpType.RENAME_CATEGORY:
-        category = await _category_name(session, payload.get("category_id"))
-        lines.append(_line("Категория", category))
-        lines.append(_line("Новое название", payload.get("new_name")))
 
     elif operation_type == PendingOpType.CREATE_SECRET:
         lines.append(_line("Название", payload.get("name")))
@@ -419,18 +326,12 @@ def _render_knowledge_changes(item, changes: dict) -> str:
         old = SENSITIVITY_LABELS.get(item.sensitivity, item.sensitivity)
         new = SENSITIVITY_LABELS.get(Sensitivity(changes["sensitivity"]), changes["sensitivity"])
         parts.append(f"чувствительность: <i>{old}</i> → {new}")
-    if "category_id" in changes:
-        parts.append("категория будет изменена")
-    if "project_id" in changes:
-        parts.append("проект будет изменён")
     if not parts:
         return "<i>Нет изменений.</i>"
     return "\n".join(f"• {part}" for part in parts)
 
 
 async def _render_task_changes(session: AsyncSession, task, changes: dict, tz: ZoneInfo) -> str:
-    from jarvis.domain.enums import TaskBucket as Bucket
-
     parts = []
     if "title" in changes:
         new_title = html.escape(str(changes["title"]))
@@ -446,23 +347,10 @@ async def _render_task_changes(session: AsyncSession, task, changes: dict, tz: Z
         else:
             new = "нет"
         parts.append(f"дедлайн: <i>{old}</i> → {new}")
-    if "bucket" in changes:
-        old = BUCKET_LABELS.get(task.bucket, "без группы") if task.bucket else "без группы"
-        raw = changes["bucket"]
-        new = BUCKET_LABELS.get(Bucket(raw), "без группы") if raw else "без группы"
-        parts.append(f"группа: <i>{old}</i> → {new}")
     if "status" in changes:
         old = STATUS_LABELS.get(task.status, task.status)
         new = STATUS_LABELS.get(TaskStatus(changes["status"]), changes["status"])
         parts.append(f"статус: <i>{old}</i> → {new}")
-    if "priority" in changes:
-        old = PRIORITY_LABELS.get(task.priority, task.priority)
-        new = PRIORITY_LABELS.get(TaskPriority(changes["priority"]), changes["priority"])
-        parts.append(f"приоритет: <i>{old}</i> → {new}")
-    if "project_id" in changes or "project_name" in changes:
-        old = await _project_label(session, {"project_id": task.project_id}) or "нет"
-        new = await _project_label(session, changes) or "нет"
-        parts.append(f"проект: <i>{html.escape(old)}</i> → {html.escape(new)}")
     if not parts:
         return "<i>Нет изменений.</i>"
     return "\n".join(f"• {part}" for part in parts)

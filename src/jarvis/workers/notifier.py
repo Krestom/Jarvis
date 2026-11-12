@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -34,10 +33,9 @@ from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis.bot.callbacks import uuid_hex
-from jarvis.bot.keyboards import diary_reminder_keyboard, reminder_keyboard
+from jarvis.bot.keyboards import reminder_keyboard
 from jarvis.config.settings import Settings
 from jarvis.db.session import session_scope
-from jarvis.repositories.diary import DiaryRepository, DiarySnoozeRepository
 from jarvis.repositories.notifications import NotificationRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.tasks import TaskService
@@ -49,8 +47,6 @@ REMINDER_SCAN_LIMIT = 50  # сколько кандидатов просматр
 DIGEST_TASK_LIMIT = 7
 DIGEST_WINDOW_MINUTES = 30
 EVENING_HOUR = 20  # сводки в 20:00 и позже — расширенный вечерний формат
-DIARY_BASE_END_HOUR = 20  # после этого дневник напоминается только в вечерней сводке
-DIARY_DIGEST_HOUR = 22
 
 SendMessage = Callable[[int, str, InlineKeyboardMarkup | None], Awaitable[None]]
 
@@ -61,7 +57,6 @@ class Outgoing:
     ref: str
     text: str
     markup: InlineKeyboardMarkup | None = None
-    snooze_id: uuid.UUID | None = None
 
 
 def parse_digest_time(raw: str) -> time | None:
@@ -105,10 +100,6 @@ def _due_soon_text(task, now: datetime, tz: ZoneInfo) -> str:
     )
 
 
-def _diary_text() -> str:
-    return "📔 Пора сделать запись в дневник за сегодня. Что запомнилось?"
-
-
 async def run_notifier_once(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
@@ -131,8 +122,6 @@ async def run_notifier_once(
     to_send: list[Outgoing] = []
     async with session_scope(session_factory) as session:
         repo = NotificationRepository(session)
-        diary = DiaryRepository(session)
-        snoozes = DiarySnoozeRepository(session)
         if settings.notify_due_reminders:
             sent = 0
             if settings.notify_before_due_minutes > 0:
@@ -173,38 +162,6 @@ async def run_notifier_once(
                 )
                 sent += 1
 
-        if settings.diary_enabled:
-            reminder_at = parse_digest_time(settings.diary_reminder_time)
-            if (
-                local_now.weekday() < 5
-                and reminder_at is not None
-                and reminder_at <= local_now.time() < time(DIARY_BASE_END_HOUR, 0)
-                and not await diary.has_entry(owner, local_now.date())
-            ):
-                ref = f"{local_now.date().isoformat()}@base"
-                if await repo.mark_if_new("diary_base", ref):
-                    to_send.append(
-                        Outgoing(
-                            "diary", ref, _diary_text(), diary_reminder_keyboard()
-                        )
-                    )
-            for snooze in await snoozes.due(owner, now):
-                if snooze.entry_date != local_now.date() or await diary.has_entry(
-                    owner, snooze.entry_date
-                ):
-                    await snoozes.delete(snooze)
-                    continue
-                await snoozes.mark_sent(snooze, now)
-                to_send.append(
-                    Outgoing(
-                        "diary",
-                        f"snooze:{snooze.id}",
-                        _diary_text(),
-                        diary_reminder_keyboard(),
-                        snooze.id,
-                    )
-                )
-
         for digest_at in parse_digest_times(settings.notify_digest_times):
             minutes_now = local_now.hour * 60 + local_now.minute
             minutes_digest = digest_at.hour * 60 + digest_at.minute
@@ -216,18 +173,9 @@ async def run_notifier_once(
             if not await repo.mark_if_new("digest", ref):
                 continue
             text = await _digest_text(session, settings, local_now, digest_at)
-            markup = None
-            if (
-                settings.diary_enabled
-                and digest_at.hour == DIARY_DIGEST_HOUR
-                and local_now.weekday() < 5
-                and not await diary.has_entry(owner, local_now.date())
-            ):
-                text += "\n\n📔 Запись в дневник за сегодня так и не сделана."
-                markup = diary_reminder_keyboard()
-            to_send.append(Outgoing("digest", ref, text, markup))
+            to_send.append(Outgoing("digest", ref, text, None))
 
-    stats = {"due": 0, "due_soon": 0, "digest": 0, "diary": 0}
+    stats = {"due": 0, "due_soon": 0, "digest": 0}
     for item in to_send:
         try:
             await send(owner, item.text, item.markup)
@@ -235,12 +183,9 @@ async def run_notifier_once(
             log.exception("notifier: failed to send %s %s", item.kind, item.ref)
             try:
                 async with session_scope(session_factory) as session:
-                    if item.snooze_id is not None:
-                        await DiarySnoozeRepository(session).reset(item.snooze_id)
-                    else:
-                        await NotificationRepository(session).unmark(
-                            item.kind, item.ref
-                        )
+                    await NotificationRepository(session).unmark(
+                        item.kind, item.ref
+                    )
             except Exception:  # noqa: BLE001 - сбой снятия отметки не рвёт проход
                 log.exception("notifier: failed to unmark %s %s", item.kind, item.ref)
             continue
@@ -248,8 +193,6 @@ async def run_notifier_once(
             stats["digest"] += 1
         elif item.kind == "task_due_soon":
             stats["due_soon"] += 1
-        elif item.kind == "diary":
-            stats["diary"] += 1
         else:
             stats["due"] += 1
     return stats

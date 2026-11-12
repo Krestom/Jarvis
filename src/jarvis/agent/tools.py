@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.agent.schemas import EntityCandidate, OutgoingFile
 from jarvis.config.settings import Settings
-from jarvis.domain.buckets import DONE_STATUSES, local_day_start
 from jarvis.domain.enums import (
     ImprovementCategory,
     ImprovementStatus,
@@ -28,16 +27,13 @@ from jarvis.domain.enums import (
     KnowledgeType,
     PendingOpType,
     Sensitivity,
-    TaskBucket,
-    TaskPriority,
     TaskStatus,
 )
+from jarvis.domain.windows import local_day_start
 from jarvis.repositories.audit import AuditRepository
-from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.improvements import OPEN_STATUSES, ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.research.provider import WebSearchProvider, WebSearchUnavailable
 from jarvis.security.redaction import looks_like_secret
@@ -95,7 +91,7 @@ class ToolSpec:
 class ListTasksArgs(BaseModel):
     view: str = Field(
         default="week",
-        description="today|week|month|long_term|someday|no_group|inbox|all|done",
+        description="today|week|no_group|all",
     )
     limit: int = Field(default=10, ge=1, le=30)
     offset: int = Field(default=0, ge=0)
@@ -104,11 +100,6 @@ class ListTasksArgs(BaseModel):
         description="День (YYYY-MM-DD): задачи с дедлайном на эту дату; "
         "используй вместо view для вопросов «задачи на 19 октября»",
     )
-    category: str | None = Field(
-        default=None,
-        max_length=120,
-        description="Название категории-папки (например «Работа»); указывается вместо view",
-    )
 
     @field_validator("view")
     @classmethod
@@ -116,12 +107,6 @@ class ListTasksArgs(BaseModel):
         if value not in TASK_VIEWS:
             raise ValueError(f"view должен быть одним из: {', '.join(TASK_VIEWS)}")
         return value
-
-
-class ListProjectTasksArgs(BaseModel):
-    project: str = Field(min_length=1, max_length=200, description="Название проекта")
-    include_done: bool = False
-    limit: int = Field(default=10, ge=1, le=30)
 
 
 class SearchTasksArgs(BaseModel):
@@ -137,21 +122,6 @@ class CreateTaskArgs(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     description: str | None = Field(default=None, max_length=2000)
     due_at: datetime | None = Field(default=None, description="ISO 8601 с часовым поясом")
-    bucket: TaskBucket | None = None
-    priority: TaskPriority | None = None
-    project: str | None = Field(default=None, max_length=200)
-    category: str | None = Field(
-        default=None, max_length=120, description="Категория-папка (если названа пользователем)"
-    )
-
-
-class CreateCategoryArgs(BaseModel):
-    name: str = Field(min_length=1, max_length=120, description="Название категории-папки")
-
-
-class CreateProjectArgs(BaseModel):
-    name: str = Field(min_length=1, max_length=200, description="Название проекта")
-    description: str | None = Field(default=None, max_length=2000)
 
 
 class ListCommentsArgs(BaseModel):
@@ -162,17 +132,9 @@ class UpdateTaskArgs(BaseModel):
     task_id: uuid.UUID
     title: str | None = Field(default=None, min_length=1, max_length=300)
     status: TaskStatus | None = None
-    priority: TaskPriority | None = None
-    bucket: TaskBucket | None = None
     # Явный null в аргументах означает «убрать срок» (см. _update_task).
     due_at: datetime | None = Field(
         default=None, description="ISO 8601 с часовым поясом; null — убрать срок"
-    )
-    project: str | None = Field(
-        default=None,
-        max_length=200,
-        description="Название проекта (создаётся, если его ещё нет); "
-        "«нет»/«без проекта» — убрать проект",
     )
 
 
@@ -196,17 +158,6 @@ class DeleteKnowledgeArgs(BaseModel):
 
 class DeleteDocumentArgs(BaseModel):
     document_id: uuid.UUID = Field(description="id документа (kind=document из search_all)")
-
-
-class RenameCategoryArgs(BaseModel):
-    name: str = Field(
-        min_length=1, max_length=120, description="Текущее название категории-папки"
-    )
-    new_name: str = Field(min_length=1, max_length=120, description="Новое название")
-
-
-class ListProjectsArgs(BaseModel):
-    limit: int = Field(default=20, ge=1, le=50)
 
 
 class SearchAllArgs(BaseModel):
@@ -258,12 +209,6 @@ class DailyStatsArgs(BaseModel):
     )
 
 
-class ExportChatArgs(BaseModel):
-    day: date | None = Field(
-        default=None, description="День (YYYY-MM-DD); по умолчанию — сегодня"
-    )
-
-
 class ExportIssuesArgs(BaseModel):
     status: str = Field(
         default="open",
@@ -279,7 +224,6 @@ class ExportIssuesArgs(BaseModel):
 class CreateKnowledgeArgs(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     content: str = Field(min_length=1, max_length=8000, description="Суть записи, дословно")
-    project: str | None = Field(default=None, max_length=200, description="Название проекта")
     knowledge_type: KnowledgeType = KnowledgeType.NOTE
     sensitive: bool = Field(
         default=False,
@@ -292,10 +236,6 @@ class UpdateKnowledgeArgs(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     summary: str | None = Field(default=None, max_length=2000)
     content: str | None = Field(default=None, min_length=1, max_length=8000)
-    category: str | None = Field(
-        default=None, max_length=120, description="Название категории-папки"
-    )
-    project: str | None = Field(default=None, max_length=200, description="Название проекта")
     # None — не трогать уровень; true/false — выставить явно.
     sensitive: bool | None = Field(
         default=None,
@@ -311,11 +251,6 @@ class UpdateDocumentArgs(BaseModel):
     document_id: uuid.UUID = Field(description="id документа (kind=document из search_all)")
     title: str | None = Field(
         default=None, min_length=1, max_length=300, description="Новое название документа"
-    )
-    category: str | None = Field(
-        default=None,
-        max_length=120,
-        description="Название категории-папки; «нет»/«без категории» — убрать категорию",
     )
     # None — не трогать уровень; true/false — выставить явно.
     sensitive: bool | None = Field(
@@ -337,15 +272,8 @@ _TOOLS: dict[str, ToolMeta] = {
     "list_tasks": ToolMeta(
         ListTasksArgs,
         "Список задач по динамическому представлению (today — включая просроченные, "
-        "week, month — до конца текущего месяца, long_term, someday, no_group, "
-        "inbox, all — все незавершённые, done). Вместо view можно указать on_date "
-        "(задачи на конкретный день) или category (категория-папка). Данные из базы.",
-        mutating=False,
-        risk="low",
-    ),
-    "list_project_tasks": ToolMeta(
-        ListProjectTasksArgs,
-        "Незавершённые (по умолчанию) задачи конкретного проекта по его названию.",
+        "week, no_group — без срока, all — все незавершённые). Вместо view можно "
+        "указать on_date (задачи на конкретный день). Данные из базы.",
         mutating=False,
         risk="low",
     ),
@@ -358,7 +286,7 @@ _TOOLS: dict[str, ToolMeta] = {
     ),
     "get_task": ToolMeta(
         GetTaskArgs,
-        "Карточка задачи: поля, проект и последние комментарии.",
+        "Карточка задачи: поля и последние комментарии.",
         mutating=False,
         risk="low",
     ),
@@ -377,26 +305,11 @@ _TOOLS: dict[str, ToolMeta] = {
         mutating=True,
         risk="low",
     ),
-    "create_category": ToolMeta(
-        CreateCategoryArgs,
-        "Создать категорию-папку для группировки задач (например «Рабочие», «Дом»). "
-        "Отправляет превью с кнопкой подтверждения. Если такая категория уже есть — "
-        "вернётся существующая без операции. Обратимо.",
-        mutating=True,
-        risk="low",
-    ),
-    "create_project": ToolMeta(
-        CreateProjectArgs,
-        "Создать проект по названию. Отправляет превью с кнопкой подтверждения. "
-        "Если такой проект уже есть — вернётся существующий без операции. Обратимо.",
-        mutating=True,
-        risk="low",
-    ),
     "update_task": ToolMeta(
         UpdateTaskArgs,
-        "Изменить разрешённые поля задачи: статус, приоритет, группу, срок, заголовок, "
-        "проект. Отправляет превью с кнопкой подтверждения (изменение применится после "
-        "нажатия). due_at=null — убрать срок; project=«нет» — убрать проект.",
+        "Изменить разрешённые поля задачи: статус, срок, заголовок. Отправляет "
+        "превью с кнопкой подтверждения (изменение применится после нажатия). "
+        "due_at=null — убрать срок.",
         mutating=True,
         risk="low",
     ),
@@ -433,19 +346,6 @@ _TOOLS: dict[str, ToolMeta] = {
         "Изменить текст комментария задачи (id комментария — из get_task). Отправляет "
         "превью с кнопкой подтверждения.",
         mutating=True,
-        risk="low",
-    ),
-    "rename_category": ToolMeta(
-        RenameCategoryArgs,
-        "Переименовать категорию-папку по текущему названию. Отправляет превью с "
-        "кнопкой подтверждения.",
-        mutating=True,
-        risk="low",
-    ),
-    "list_projects": ToolMeta(
-        ListProjectsArgs,
-        "Актуальные проекты (id и названия) — чтобы сопоставить название из речи.",
-        mutating=False,
         risk="low",
     ),
     "search_all": ToolMeta(
@@ -511,13 +411,6 @@ _TOOLS: dict[str, ToolMeta] = {
         mutating=False,
         risk="low",
     ),
-    "export_chat": ToolMeta(        ExportChatArgs,
-        "Выгрузить журнал диалога за день двумя файлами (Markdown + JSON) — они "
-        "уйдут в чат вместе с ответом. Текст уже с маскировкой секретов. Используй, "
-        "когда просят экспортировать/выгрузить переписку.",
-        mutating=False,
-        risk="low",
-    ),
     "export_issues": ToolMeta(
         ExportIssuesArgs,
         "Выгрузить improvement backlog (диагностику) двумя файлами Markdown + JSON — "
@@ -528,16 +421,16 @@ _TOOLS: dict[str, ToolMeta] = {
     ),
     "create_knowledge": ToolMeta(
         CreateKnowledgeArgs,
-        "Сохранить запись знаний (заметку/инструкцию/решение) в базу, при желании — "
-        "в проект. Создаёт pending-операцию: запись сохранится после кнопки "
-        "подтверждения. Для кредов/паролей/токенов обязательно sensitive=true.",
+        "Сохранить запись знаний (заметку/инструкцию/решение) в базу. Создаёт "
+        "pending-операцию: запись сохранится после кнопки подтверждения. Для "
+        "кредов/паролей/токенов обязательно sensitive=true.",
         mutating=True,
         risk="medium",
     ),
     "update_knowledge": ToolMeta(
         UpdateKnowledgeArgs,
-        "Изменить заметку знаний: заголовок, сводку, текст, категорию, проект, "
-        "уровень чувствительности. Отправляет превью с кнопкой подтверждения — "
+        "Изменить заметку знаний: заголовок, сводку, текст, уровень "
+        "чувствительности. Отправляет превью с кнопкой подтверждения — "
         "изменение применится после нажатия. Работает и с чувствительными "
         "заметками; указывай только те поля, которые меняешь.",
         mutating=True,
@@ -638,21 +531,6 @@ class ToolRegistry:
                     "limit": args.limit,
                 },
             )
-        if args.category:
-            category = await CategoryRepository(self._session).find_by_name(args.category)
-            if category is None:
-                return ToolResult.failure(
-                    "not_found",
-                    f"категория «{args.category}» не найдена; список категорий — в /settings",
-                )
-            tasks = await TaskRepository(self._session).list_by_category(
-                category.id, limit=args.limit, offset=args.offset
-            )
-            await self._surface_tasks(tasks)
-            return ToolResult(
-                ok=True,
-                data={"category": category.name, "items": await self._task_briefs(tasks)},
-            )
         now = datetime.now(self._settings.tz)
         tasks = await service.list_view(
             args.view,
@@ -669,29 +547,6 @@ class ToolRegistry:
                 "items": await self._task_briefs(tasks),
                 "offset": args.offset,
                 "limit": args.limit,
-            },
-        )
-
-    async def _list_project_tasks(self, args: ListProjectTasksArgs) -> ToolResult:
-        project = await ProjectRepository(self._session).find_by_name(args.project)
-        if project is None:
-            return ToolResult.failure(
-                "not_found", f"проект «{args.project}» не найден; посмотри list_projects"
-            )
-        tasks = await TaskRepository(self._session).list_for_project(
-            project.id, limit=min(args.limit * 2, 60)
-        )
-        if not args.include_done:
-            tasks = [task for task in tasks if task.status not in DONE_STATUSES]
-        tasks = tasks[: args.limit]
-        await self._surface_tasks(tasks)
-        return ToolResult(
-            ok=True,
-            data={
-                "project": project.name,
-                "project_id": str(project.id),
-                "items": await self._task_briefs(tasks),
-                "include_done": args.include_done,
             },
         )
 
@@ -824,24 +679,6 @@ class ToolRegistry:
             },
         )
 
-    async def _list_projects(self, args: ListProjectsArgs) -> ToolResult:
-        projects = await ProjectRepository(self._session).list_active(limit=args.limit)
-        self._surface(
-            [
-                EntityCandidate(kind="project", id=project.id, title=project.name)
-                for project in projects
-            ]
-        )
-        return ToolResult(
-            ok=True,
-            data={
-                "items": [
-                    {"id": str(project.id), "name": project.name, "status": project.status.value}
-                    for project in projects
-                ]
-            },
-        )
-
     async def _search_all(self, args: SearchAllArgs) -> ToolResult:
         hits = await SearchService(self._session).search(args.query, limit=args.limit)
         items = []
@@ -937,30 +774,6 @@ class ToolRegistry:
                         for item in new_items
                     ],
                 },
-            },
-        )
-
-    async def _export_chat(self, args: ExportChatArgs) -> ToolResult:
-        from jarvis.services.chatlog import export_chat_day
-
-        day = args.day or datetime.now(self._settings.tz).date()
-        result = await export_chat_day(self._session, self._settings, day)
-        stamp = day.strftime("%Y%m%d")
-        self.outgoing_files.append(
-            OutgoingFile(filename=f"jarvis_chat_{stamp}.md", data=result.markdown.encode("utf-8"))
-        )
-        self.outgoing_files.append(
-            OutgoingFile(
-                filename=f"jarvis_chat_{stamp}.json", data=result.json_text.encode("utf-8")
-            )
-        )
-        return ToolResult(
-            ok=True,
-            data={
-                "date": day.isoformat(),
-                "message_count": result.message_count,
-                "truncated": result.truncated,
-                "note": "два файла (MD и JSON) отправятся в чат вместе с ответом",
             },
         )
 
@@ -1061,7 +874,6 @@ class ToolRegistry:
             content=args.content,
             source_type=KnowledgeSource.TEXT,
             original_text=args.content,
-            project_name=args.project,
             sensitivity=Sensitivity.SENSITIVE if sensitive else Sensitivity.NORMAL,
         )
         result = await self._propose(
@@ -1070,35 +882,14 @@ class ToolRegistry:
             summary=f"запись «{args.title}»",
         )
         result.data["title"] = args.title
-        result.data["project"] = args.project
         result.data["sensitivity"] = draft.sensitivity.value
         return result
 
     async def _create_task(self, args: CreateTaskArgs) -> ToolResult:
-        category_id = None
-        category_name = None
-        if args.category:
-            category = await CategoryRepository(self._session).find_by_name(args.category)
-            if category is not None:
-                category_id = category.id
-            else:
-                # Категории нет: предлагаем её создать (если ещё не предложена) и
-                # привязываем задачу по имени — id разрешится при подтверждении.
-                proposed = await self._create_category(CreateCategoryArgs(name=args.category))
-                created_id = proposed.data.get("category_id")
-                if created_id:
-                    category_id = uuid.UUID(str(created_id))
-                else:
-                    category_name = args.category
         draft = TaskDraft(
             title=args.title,
             description=args.description,
             due_at=args.due_at,
-            bucket=args.bucket,
-            project_name=args.project,
-            category_id=category_id,
-            category_name=category_name,
-            **({"priority": args.priority} if args.priority else {}),
         )
         result = await self._propose(
             PendingOpType.CREATE_TASK,
@@ -1106,115 +897,14 @@ class ToolRegistry:
             summary=f"задача «{args.title}»",
         )
         result.data["title"] = args.title
-        if category_name:
-            result.data["category"] = category_name
-            result.data["note"] = (
-                f"категории «{category_name}» ещё нет: отправлены две кнопки — "
-                "подтверждение создания категории и подтверждение задачи "
-                "(задача встанет в эту категорию)"
-            )
         return result
-
-    async def _create_category(self, args: CreateCategoryArgs) -> ToolResult:
-        name = args.name.strip()[:120]
-        existing = await CategoryRepository(self._session).find_by_name(name)
-        if existing is not None:
-            return ToolResult(
-                ok=True,
-                mutating=True,
-                data={
-                    "category_id": str(existing.id),
-                    "name": existing.name,
-                    "note": "категория уже существует",
-                },
-            )
-        if await self._category_already_proposed(name):
-            return ToolResult(
-                ok=True,
-                mutating=True,
-                data={
-                    "name": name,
-                    "status": "confirmation_required",
-                    "note": "категория уже предложена на подтверждение ранее в этом диалоге",
-                },
-            )
-        return await self._propose(
-            PendingOpType.CREATE_CATEGORY,
-            {"name": name},
-            summary=f"категория «{name}»",
-        )
-
-    async def _rename_category(self, args: RenameCategoryArgs) -> ToolResult:
-        category = await CategoryRepository(self._session).find_by_name(args.name)
-        if category is None:
-            return ToolResult.failure(
-                "not_found", f"категория «{args.name}» не найдена", mutating=True
-            )
-        new_name = args.new_name.strip()[:120]
-        result = await self._propose(
-            PendingOpType.RENAME_CATEGORY,
-            {"category_id": str(category.id), "new_name": new_name},
-            summary=f"категория «{category.name}» → «{new_name}»",
-        )
-        result.data["category_id"] = str(category.id)
-        return result
-
-    async def _category_already_proposed(self, name: str) -> bool:
-        """Уже висит неподтверждённое предложение создать такую категорию."""
-        from sqlalchemy import select
-
-        from jarvis.db.models import PendingOperation
-        from jarvis.domain.enums import PendingStatus
-
-        result = await self._session.execute(
-            select(PendingOperation).where(
-                PendingOperation.telegram_user_id == self._user_id,
-                PendingOperation.operation_type == PendingOpType.CREATE_CATEGORY,
-                PendingOperation.status == PendingStatus.PENDING,
-            )
-        )
-        for operation in result.scalars():
-            if str(operation.payload.get("name", "")).strip().lower() == name.lower():
-                return True
-        return False
-
-    async def _create_project(self, args: CreateProjectArgs) -> ToolResult:
-        name = args.name.strip()[:200]
-        existing = await ProjectRepository(self._session).find_by_name(name)
-        if existing is not None:
-            return ToolResult(
-                ok=True,
-                mutating=True,
-                data={
-                    "project_id": str(existing.id),
-                    "name": existing.name,
-                    "note": "проект уже существует",
-                },
-            )
-        return await self._propose(
-            PendingOpType.CREATE_PROJECT,
-            {"name": name, "description": args.description},
-            summary=f"проект «{name}»",
-        )
 
     async def _update_task(self, args: UpdateTaskArgs) -> ToolResult:
         # exclude_unset: меняем только явно переданные поля; mode="json" — payload уйдёт в JSONB.
         raw = args.model_dump(exclude={"task_id"}, exclude_unset=True, mode="json")
-        changes = {
-            key: value for key, value in raw.items() if value is not None and key != "project"
-        }
+        changes = {key: value for key, value in raw.items() if value is not None}
         if "due_at" in raw and raw["due_at"] is None:
             changes["due_at"] = None  # явный null — убрать срок
-        if raw.get("project") is not None:
-            name = str(raw["project"]).strip()
-            if name.lower() in ("нет", "без проекта", "none", "-"):
-                changes["project_id"] = None
-            else:
-                project = await ProjectRepository(self._session).find_by_name(name)
-                if project is not None:
-                    changes["project_id"] = str(project.id)
-                else:
-                    changes["project_name"] = name  # создастся при подтверждении
         if not changes:
             return ToolResult.failure("validation", "не указаны изменения", mutating=True)
         task = await TaskRepository(self._session).get(args.task_id)
@@ -1270,24 +960,6 @@ class ToolRegistry:
             changes["summary"] = args.summary
         if args.content is not None:
             changes["content"] = args.content
-        if args.category is not None:
-            category = await CategoryRepository(self._session).find_by_name(args.category)
-            if category is None:
-                return ToolResult.failure(
-                    "not_found",
-                    f"категория «{args.category}» не найдена (создаётся в /settings)",
-                    mutating=True,
-                )
-            changes["category_id"] = str(category.id)
-        if args.project is not None:
-            project = await ProjectRepository(self._session).find_by_name(args.project)
-            if project is None:
-                return ToolResult.failure(
-                    "not_found",
-                    f"проект «{args.project}» не найден (посмотри list_projects)",
-                    mutating=True,
-                )
-            changes["project_id"] = str(project.id)
         if args.sensitive is not None:
             changes["sensitivity"] = (
                 Sensitivity.SENSITIVE.value if args.sensitive else Sensitivity.NORMAL.value
@@ -1308,19 +980,6 @@ class ToolRegistry:
         changes: dict = {}
         if args.title is not None:
             changes["title"] = args.title.strip()
-        if args.category is not None:
-            name = args.category.strip()
-            if name.lower() in ("нет", "без категории", "none", "-", ""):
-                changes["category_id"] = None
-            else:
-                category = await CategoryRepository(self._session).find_by_name(name)
-                if category is None:
-                    return ToolResult.failure(
-                        "not_found",
-                        f"категория «{name}» не найдена (создаётся в /settings)",
-                        mutating=True,
-                    )
-                changes["category_id"] = str(category.id)
         if args.sensitive is not None:
             changes["sensitivity"] = (
                 Sensitivity.SENSITIVE if args.sensitive else Sensitivity.NORMAL
@@ -1423,27 +1082,10 @@ class ToolRegistry:
         )
 
     async def _task_briefs(self, tasks: list) -> list[dict[str, Any]]:
-        projects = await self._project_names(tasks)
-        return [
-            task_brief(task, projects, tz=self._settings.tz) for task in tasks
-        ]
-
-    async def _project_names(self, tasks: list) -> dict[uuid.UUID, str]:
-        project_ids = {task.project_id for task in tasks if task.project_id}
-        if not project_ids:
-            return {}
-        repo = ProjectRepository(self._session)
-        names: dict[uuid.UUID, str] = {}
-        for project_id in project_ids:
-            project = await repo.get(project_id)
-            if project is not None:
-                names[project_id] = project.name
-        return names
+        return [task_brief(task, tz=self._settings.tz) for task in tasks]
 
 
-def task_brief(
-    task, projects: dict[uuid.UUID, str] | None = None, tz=None
-) -> dict[str, Any]:
+def task_brief(task, tz=None) -> dict[str, Any]:
     due_local = None
     if task.due_at is not None and tz is not None:
         due_local = task.due_at.astimezone(tz).isoformat()
@@ -1451,11 +1093,8 @@ def task_brief(
         "id": str(task.id),
         "title": task.title,
         "status": task.status.value,
-        "bucket": task.bucket.value if task.bucket else None,
-        "priority": task.priority.value,
         "due_at": task.due_at.isoformat() if task.due_at else None,
         "due_at_local": due_local,
-        "project": (projects or {}).get(task.project_id),
     }
 
 

@@ -14,7 +14,6 @@ from jarvis.ai.provider import AIError, InterpreterContext
 CTX = InterpreterContext(
     now=datetime(2026, 10, 15, 12, 0, tzinfo=UTC),
     tz_name="Europe/Moscow",
-    categories=["Работа"],
     session_id="tg-111",
 )
 
@@ -81,7 +80,7 @@ async def test_interpret_parses_json_and_sends_expected_request():
     body = captured["body"]
     assert body["model"] == "deepseek-v4.1-flash"
     assert body["response_format"]["type"] == "json_schema"
-    assert "Работа" in body["messages"][1]["content"]
+    assert "Europe/Moscow" in body["messages"][1]["content"]
 
 
 async def test_retry_on_server_error_then_success():

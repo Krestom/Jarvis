@@ -1,4 +1,4 @@
-"""Задачи: списки, карточка, изменение срока/группы/статуса."""
+"""Задачи: списки, карточка, изменение срока/статуса."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
-from jarvis.bot.callbacks import TaskCB, TaskListCB, uuid_hex
+from jarvis.bot.callbacks import TaskCB, TaskListCB
 from jarvis.bot.formatting import esc
 from jarvis.bot.handlers.open_entity import (
     parse_hex_uuid,
@@ -20,9 +20,7 @@ from jarvis.bot.handlers.open_entity import (
 from jarvis.bot.handlers.render import propose_and_send, send_or_edit, send_outcome
 from jarvis.bot.keyboards import (
     PAGE_SIZE,
-    bucket_keyboard,
     main_menu,
-    task_categories_keyboard,
     task_list_keyboard,
     tasks_menu_keyboard,
 )
@@ -32,14 +30,12 @@ from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.preview import task_list_text, task_view_title
 from jarvis.conversation.state import ConversationStore
-from jarvis.domain.buckets import DONE_STATUSES
-from jarvis.domain.enums import PendingOpType, TaskBucket
+from jarvis.domain.enums import PendingOpType
+from jarvis.domain.windows import DONE_STATUSES
 from jarvis.repositories.audit import AuditRepository
-from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.tasks import TaskRepository
-from jarvis.services.catalog import CatalogService
 from jarvis.services.tasks import TaskService
 
 
@@ -58,20 +54,6 @@ async def build_task_list(
             day, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
         )
         title = f"📋 Задачи на {day.strftime('%d.%m.%Y')}"
-    elif view == "category":
-        category_id = parse_hex_uuid(value)
-        category = (
-            await CategoryRepository(session).get(category_id) if category_id else None
-        )
-        if category is None:
-            categories = await CatalogService(session).list_categories()
-            return "🗂 Категория не найдена — выберите заново.", task_categories_keyboard(
-                categories
-            )
-        tasks = await service.list_by_category(
-            category.id, limit=PAGE_SIZE, offset=page * PAGE_SIZE
-        )
-        title = f"🗂 {esc(category.name)}"
     else:
         tasks = await service.list_view(
             view, now=now, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
@@ -97,16 +79,6 @@ async def send_task_list(
 async def task_list(
     callback: CallbackQuery, callback_data: TaskListCB, session: AsyncSession, settings: Settings
 ) -> None:
-    if callback_data.view == "category" and not callback_data.value:
-        categories = await CatalogService(session).list_categories()
-        await callback.answer()
-        await send_or_edit(
-            callback.message,
-            "🗂 <b>Задачи по категориям</b>",
-            markup=task_categories_keyboard(categories),
-            edit=True,
-        )
-        return
     text, markup = await build_task_list(
         session, settings, callback_data.view, callback_data.page, callback_data.value
     )
@@ -204,36 +176,6 @@ async def task_action(
         await callback.message.answer(
             f"На когда перенести «{esc(task.title)}»?\n"
             "Напишите: <i>завтра</i>, <i>в пятницу</i>, <i>22.10.2026</i>, <i>22.10 в 18:00</i>."
-        )
-        return
-
-    if action == "bucket":
-        await callback.answer()
-        await send_or_edit(
-            callback.message,
-            f"Группа для «{esc(task.title)}»:",
-            markup=bucket_keyboard(uuid_hex(task.id)),
-            edit=True,
-        )
-        return
-
-    if action == "bucket_set":
-        value = callback_data.value
-        bucket = None
-        if value != "none":
-            try:
-                bucket = TaskBucket(value).value
-            except ValueError:
-                await callback.answer("Неизвестная группа", show_alert=True)
-                return
-        await callback.answer()
-        await propose_and_send(
-            callback.message,
-            session,
-            settings,
-            user_id,
-            PendingOpType.UPDATE_TASK,
-            {"task_id": str(task.id), "changes": {"bucket": bucket}},
         )
         return
 

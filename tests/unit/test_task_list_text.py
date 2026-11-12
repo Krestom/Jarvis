@@ -7,7 +7,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from jarvis.conversation.preview import TASK_VIEW_TITLES, task_list_text
-from jarvis.domain.enums import TaskBucket, TaskPriority, TaskStatus
+from jarvis.domain.enums import TaskStatus
 from jarvis.services.tasks import TASK_VIEWS
 
 TZ = ZoneInfo("Europe/Moscow")
@@ -18,8 +18,6 @@ NOW = datetime(2026, 10, 18, 12, 0, tzinfo=TZ)
 class FakeTask:
     title: str
     status: TaskStatus = TaskStatus.TODO
-    bucket: TaskBucket | None = None
-    priority: TaskPriority = TaskPriority.NORMAL
     due_at: datetime | None = None
 
 
@@ -60,15 +58,13 @@ def test_task_list_day_header_keeps_date_for_overdue() -> None:
 def test_task_list_text_rich_line() -> None:
     task = FakeTask(
         title="Позвонить в банк",
-        bucket=TaskBucket.TODAY,
-        priority=TaskPriority.HIGH,
         due_at=datetime(2026, 10, 19, 18, 0, tzinfo=TZ),
     )
     lines = task_list_text("🔸 Задачи на сегодня", [task], TZ, NOW).splitlines()
     assert lines[0] == "🔸 Задачи на сегодня"
     assert lines[1] == ""
     assert lines[2].startswith("1. ▪️ Позвонить в банк <i>(до 19 октября 2026, 18:00")
-    assert "Сегодня" in lines[2] and "высокий" in lines[2]
+    assert "Сегодня" not in lines[2]
 
 
 def test_task_line_escapes_html() -> None:

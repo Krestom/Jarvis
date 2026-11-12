@@ -80,11 +80,6 @@ class Settings(BaseSettings):
     # Каталог для выгрузок improvement backlog (Markdown/JSON).
     export_dir: Path = Path("var/exports")
 
-    # --- Журнал чата (дневной экспорт диалога) ---
-    # Тексты сохраняются уже redacted; журнал можно выключить и он чистится.
-    chat_log_enabled: bool = True
-    chat_log_retention_days: int = 30
-
     # --- AI-агент (Stage 3) ---
     agent_enabled: bool = True
     # Бюджеты времени (секунды, monotonic) по профилям запроса.
@@ -132,11 +127,6 @@ class Settings(BaseSettings):
     conversation_state_ttl_hours: int = 24
     pending_operation_ttl_minutes: int = 30
     processed_updates_retention_hours: int = 72
-
-    # --- Личный дневник ---
-    diary_enabled: bool = True
-    # Время напоминания в рабочие дни (Пн–Пт), локальное время APP_TIMEZONE.
-    diary_reminder_time: str = "16:30"
 
     # --- Валидаторы ---
 

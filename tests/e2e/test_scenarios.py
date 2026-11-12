@@ -13,25 +13,21 @@ from sqlalchemy import func, select
 from jarvis.ai.fake import FakeProvider
 from jarvis.ai.schemas import Interpretation
 from jarvis.bot.app import create_dispatcher
-from jarvis.bot.chatlog import build_out_recorder
-from jarvis.db.models import ChatMessage, KnowledgeItem, Task
+from jarvis.db.models import KnowledgeItem, Task
 from jarvis.documents.storage import EncryptedFileStorage
 from jarvis.domain.enums import (
     DocumentStatus,
     ImprovementCategory,
     ImprovementSource,
     ImprovementStatus,
-    TaskBucket,
     TaskStatus,
 )
-from jarvis.repositories.categories import CategoryRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.improvements import ImprovementRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.secrets import SecretRepository
 from jarvis.repositories.tasks import TaskRepository
-from jarvis.services.catalog import CatalogService
 from jarvis.services.drafts import TaskDraft
 from jarvis.services.improvements import ImprovementService
 from jarvis.services.secrets import SecretService
@@ -51,9 +47,6 @@ def classic_settings(test_settings):
 async def make_harness(
     settings, session_factory, *, ai=None, transcription=None
 ) -> BotHarness:
-    async with session_factory() as session:
-        await CatalogService(session).ensure_defaults()
-        await session.commit()
     dispatcher = create_dispatcher(
         settings,
         session_factory,
@@ -61,7 +54,6 @@ async def make_harness(
         transcription,
     )
     session = FakeTelegramSession()
-    session.recorder = build_out_recorder(session_factory, settings)
     harness = BotHarness(dispatcher, session)
     await harness.start()
     return harness
@@ -78,6 +70,32 @@ async def confirm_last(harness: BotHarness, user_id: int, messages) -> list:
 
 
 # 1. Текстовая мысль -> подтверждение -> запись находится поиском.
+async def test_start_is_short_and_menu_is_clean(classic_settings, session_factory):
+    from jarvis.bot.texts import START_TEXT
+
+    harness = await make_harness(classic_settings, session_factory)
+    messages = await harness.send_text(DEFAULT_USER_ID, "/start")
+    combined = " ".join(message.text or "" for message in messages)
+    assert START_TEXT in combined
+    assert "Что я умею" not in combined
+
+    menu = keyboard_messages(messages)[-1]
+    labels = [
+        button.text for row in menu.reply_markup.inline_keyboard for button in row
+    ]
+    assert "📔 Дневник" not in labels
+    assert "🗂 Проекты" not in labels
+    assert "⚙️ Настройки" not in labels
+
+
+async def test_help_has_no_removed_commands(classic_settings, session_factory):
+    harness = await make_harness(classic_settings, session_factory)
+    messages = await harness.send_text(DEFAULT_USER_ID, "/help")
+    combined = " ".join(message.text or "" for message in messages)
+    for command in ("/diary", "/export_chat", "/settings", "/inbox"):
+        assert command not in combined
+
+
 async def test_scenario_text_note_to_search(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
@@ -116,7 +134,7 @@ async def test_scenario_text_note_to_search(classic_settings, session_factory, s
 async def test_scenario_task_list_is_clickable(classic_settings, session_factory, session):
     """Список задач из NL («на неделю») — кнопки открытия карточки, без /tasks."""
     await TaskService(session).create_from_draft(
-        TaskDraft(title="Обновить дашборд", bucket=TaskBucket.WEEK)
+        TaskDraft(title="Обновить дашборд", due_at=datetime.now(UTC) + timedelta(days=2))
     )
     await session.commit()
 
@@ -158,7 +176,6 @@ async def test_scenario_voice_task(classic_settings, session_factory, session):
             entities={
                 "title": "Обновить инфраструктуру",
                 "due_at": tomorrow.isoformat(),
-                "bucket": "week",
             },
             confidence=0.9,
         )
@@ -173,13 +190,6 @@ async def test_scenario_voice_task(classic_settings, session_factory, session):
     messages = await harness.send_voice(DEFAULT_USER_ID)
     assert any("Распознано" in (m.text or "") for m in messages)
     assert transcription.calls == ["voice.ogg"]
-
-    # Распознанный текст попадает в журнал чата (источник voice).
-    voice_rows = (
-        await session.execute(select(ChatMessage).where(ChatMessage.source == "voice"))
-    ).scalars().all()
-    assert len(voice_rows) == 1
-    assert voice_rows[0].text.startswith("Поставь задачу")
 
     await confirm_last(harness, DEFAULT_USER_ID, messages)
     await session.commit()
@@ -229,62 +239,6 @@ async def test_reminder_complete_button_closes_task(
     task = await TaskRepository(session).get(task_id)
     assert task.status == TaskStatus.DONE
     assert "завершена" in (harness.current(reminder).text or "").lower()
-
-
-async def test_diary_create_multiple_edit_and_delete(
-    classic_settings, session_factory, session
-):
-    from jarvis.repositories.diary import DiaryRepository
-
-    harness = await make_harness(classic_settings, session_factory)
-    messages = await harness.send_text(DEFAULT_USER_ID, "/diary")
-    screen = keyboard_messages(messages)[-1]
-    assert "Дневник" in (screen.text or "")
-
-    await harness.click_button(DEFAULT_USER_ID, screen, "Сделать запись")
-    saved = await harness.send_text(DEFAULT_USER_ID, "Первая мысль")
-    quick = keyboard_messages(saved)[-1]
-    await harness.click_button(DEFAULT_USER_ID, quick, "Дневник")
-    diary_message = harness.current(quick)
-    assert "Первая мысль" in (diary_message.text or "")
-
-    # Вторая запись за тот же день.
-    await harness.click_button(DEFAULT_USER_ID, diary_message, "Сделать запись")
-    saved2 = await harness.send_text(DEFAULT_USER_ID, "Вторая мысль")
-    quick2 = keyboard_messages(saved2)[-1]
-    await harness.click_button(DEFAULT_USER_ID, quick2, "Дневник")
-    diary_message = harness.current(quick2)
-    assert "Первая мысль" in (diary_message.text or "")
-    assert "Вторая мысль" in (diary_message.text or "")
-
-    today = datetime.now(UTC).astimezone(classic_settings.tz).date()
-    repo = DiaryRepository(session)
-    entries = await repo.list_day(DEFAULT_USER_ID, today)
-    assert [entry.content for entry in entries] == ["Первая мысль", "Вторая мысль"]
-
-    # Правка первой записи: меняется только текст, время остаётся.
-    first_created = entries[0].created_at
-    await harness.click_button(DEFAULT_USER_ID, diary_message, "✏️")
-    saved3 = await harness.send_text(DEFAULT_USER_ID, "Исправленная мысль")
-    quick3 = keyboard_messages(saved3)[-1]
-    await harness.click_button(DEFAULT_USER_ID, quick3, "Дневник")
-    diary_message = harness.current(quick3)
-    session.expire_all()
-    entries = await repo.list_day(DEFAULT_USER_ID, today)
-    assert [entry.content for entry in entries] == [
-        "Исправленная мысль",
-        "Вторая мысль",
-    ]
-    assert entries[0].created_at == first_created
-
-    # Удаление второй записи через подтверждение.
-    await harness.click_button(DEFAULT_USER_ID, diary_message, "🗑 2")
-    confirm = harness.current(diary_message)
-    await harness.click_button(DEFAULT_USER_ID, confirm, "Да, удалить")
-    assert "Вторая мысль" not in (harness.current(confirm).text or "")
-    session.expire_all()
-    entries = await repo.list_day(DEFAULT_USER_ID, today)
-    assert [entry.content for entry in entries] == ["Исправленная мысль"]
 
 
 async def test_task_card_back_returns_to_same_list(
@@ -351,7 +305,7 @@ async def test_scenario_document_flow_survives_restart(
     ai.queue(
         Interpretation(
             intent="document_upload",
-            entities={"category": "Документы"},
+            entities={},
             confidence=0.9,
         )
     )
@@ -396,8 +350,9 @@ async def test_scenario_document_flow_survives_restart(
 async def test_scenario_due_change_requires_confirmation(
     classic_settings, session_factory, session
 ):
+    original_due = datetime.now(UTC)
     task_id = await TaskService(session).create_from_draft(
-        TaskDraft(title="Продлить домен", bucket=TaskBucket.TODAY)
+        TaskDraft(title="Продлить домен", due_at=original_due)
     )
     await session.commit()
 
@@ -416,7 +371,7 @@ async def test_scenario_due_change_requires_confirmation(
 
     task = await TaskRepository(session).get(task_id)
     await session.refresh(task)
-    assert task.due_at is None  # до подтверждения ничего не поменялось
+    assert task.due_at == original_due  # до подтверждения ничего не поменялось
 
     await confirm_last(harness, DEFAULT_USER_ID, proposal)
     await session.commit()
@@ -536,44 +491,6 @@ async def test_pending_task_without_due_accepts_date(classic_settings, session_f
     assert tasks and tasks[0].due_at is not None
 
 
-async def test_pending_task_in_new_category_is_attached(
-    classic_settings, session_factory, session
-):
-    """Категория названа, но её нет: задача привяжется по имени, категория создастся."""
-    ai = FakeProvider()
-    ai.queue(
-        Interpretation(
-            intent="create_task",
-            entities={
-                "title": "Вызвать мастера",
-                "category": "Ванная",
-                "due_at": "2026-11-01T12:00:00+03:00",
-            },
-            confidence=0.9,
-        )
-    )
-    harness = await make_harness(classic_settings, session_factory, ai=ai)
-
-    messages = await harness.send_text(
-        DEFAULT_USER_ID, "Заведи задачу в категории «Ванная»: вызвать мастера"
-    )
-    combined = " ".join(m.text or "" for m in messages)
-    assert "Создать задачу?" in combined
-    assert "Ванная" in combined  # категория попала в превью
-
-    await confirm_last(harness, DEFAULT_USER_ID, messages)
-    await session.commit()
-    session.expire_all()
-
-    from jarvis.repositories.categories import CategoryRepository
-
-    tasks = await TaskRepository(session).search("Вызвать мастера")
-    category = await CategoryRepository(session).find_by_name("Ванная")
-    assert category is not None
-    assert tasks and tasks[0].category_id == category.id
-
-
-# 6. Неавторизованный пользователь не получает доступ.
 async def test_scenario_unauthorized_user_is_ignored(classic_settings, session_factory, session):
     harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
     messages = await harness.send_text(9999, "Покажи мои секреты")
@@ -669,7 +586,7 @@ async def test_scenario_secret_reveal_escapes_html(classic_settings, session_fac
 # 9. Комментарии к задаче через карточку: добавить, увидеть, отредактировать.
 async def test_scenario_task_comments_via_card(classic_settings, session_factory, session):
     task_id = await TaskService(session).create_from_draft(
-        TaskDraft(title="Проверить бэкап", bucket=TaskBucket.TODAY)
+        TaskDraft(title="Проверить бэкап", due_at=datetime.now(UTC))
     )
     await session.commit()
 
@@ -800,8 +717,12 @@ async def test_scenario_force_save_secret(classic_settings, session_factory, ses
 # 12. «Какие у меня задачи на неделю» — выводим список, а не «ничего не нашёл».
 async def test_scenario_list_tasks(classic_settings, session_factory, session):
     service = TaskService(session)
-    await service.create_from_draft(TaskDraft(title="Обновить дашборд", bucket=TaskBucket.WEEK))
-    await service.create_from_draft(TaskDraft(title="Позвонить в сервис", bucket=TaskBucket.TODAY))
+    await service.create_from_draft(
+        TaskDraft(title="Обновить дашборд", due_at=datetime.now(UTC) + timedelta(days=2))
+    )
+    await service.create_from_draft(
+        TaskDraft(title="Позвонить в сервис", due_at=datetime.now(UTC))
+    )
     await session.commit()
 
     ai = FakeProvider()
@@ -843,49 +764,6 @@ async def test_scenario_list_comments(classic_settings, session_factory, session
 
 
 # 14. «Сохрани креды в проект SuperSport» — проект создаётся, запись привязывается.
-async def test_scenario_credentials_into_project(classic_settings, session_factory, session):
-    ai = FakeProvider()
-    ai.queue(
-        Interpretation(
-            intent="create_knowledge",
-            entities={
-                "title": "Креды SuperSport",
-                "content": "логин: admin, пароль: qwerty-123",
-                "project": "SuperSport",
-            },
-            sensitivity_hints=["secret"],
-            confidence=0.9,
-        )
-    )
-    harness = await make_harness(classic_settings, session_factory, ai=ai)
-    messages = await harness.send_text(
-        DEFAULT_USER_ID,
-        "Создай проект SuperSport и сохрани туда креды доступа: логин admin, пароль qwerty-123",
-    )
-    assert any("есть секрет" in (m.text or "") for m in messages)
-
-    force_message = keyboard_messages(messages)[-1]
-    chosen = await harness.click_button(DEFAULT_USER_ID, force_message, "Всё равно сохранить")
-    combined = " ".join(m.text or "" for m in chosen)
-    assert "Сохранить запись?" in combined
-    assert "SuperSport" in combined  # проект виден в превью
-
-    await confirm_last(harness, DEFAULT_USER_ID, chosen)
-    await session.commit()
-
-    from jarvis.domain.enums import Sensitivity
-    from jarvis.repositories.projects import ProjectRepository
-
-    project = await ProjectRepository(session).find_by_name("SuperSport")
-    assert project is not None
-
-    items = await KnowledgeRepository(session).list_recent()
-    assert len(items) == 1
-    assert items[0].sensitivity == Sensitivity.SENSITIVE
-    assert items[0].project_id == project.id
-
-
-# 15. Жалоба на ассистента: достоверная гипотеза — в backlog, слабая — отброшена.
 async def test_scenario_improvement_hypothesis_recorded(classic_settings, session_factory, session):
     ai = FakeProvider()
     ai.queue(
@@ -1034,7 +912,7 @@ async def test_scenario_export_issues(classic_settings, session_factory, session
 # 19. Типизированный UI: LLM просит кнопки, сервер собирает их по allow-list.
 async def test_scenario_typed_ui_quick_actions(classic_settings, session_factory, session):
     await TaskService(session).create_from_draft(
-        TaskDraft(title="Позвонить в сервис", bucket=TaskBucket.TODAY)
+        TaskDraft(title="Позвонить в сервис", due_at=datetime.now(UTC))
     )
     await session.commit()
 
@@ -1088,110 +966,3 @@ async def test_scenario_tasks_on_named_date(classic_settings, session_factory, s
 
 
 # 21. Категории-папки задач: просмотр задач по категории.
-async def test_scenario_tasks_by_category(classic_settings, session_factory, session):
-    category = await CategoryRepository(session).create("Рабочие")
-    await TaskService(session).create_from_draft(
-        TaskDraft(title="Отчёт по УВ", category_id=category.id)
-    )
-    await session.commit()
-
-    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
-    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
-    menu_message = keyboard_messages(messages)[-1]
-
-    # Навигация правит то же сообщение, новых не шлёт.
-    picked_category = await harness.click_button(
-        DEFAULT_USER_ID, menu_message, "По категориям"
-    )
-    assert picked_category == []
-    categories_message = harness.current(menu_message)
-    assert "Задачи по категориям" in (categories_message.text or "")
-
-    picked = await harness.click_button(DEFAULT_USER_ID, categories_message, "Рабочие")
-    assert picked == []
-    list_view = harness.current(menu_message)
-    assert "Отчёт по УВ" in (list_view.text or "")
-    assert "Выберите задачу:" in (list_view.text or "")
-
-
-# 23. Меню задач: месяц вместо Inbox и «Когда-нибудь», все задачи вместо долгосрочных.
-async def test_tasks_menu_month_view(classic_settings, session_factory, session):
-    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
-
-    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
-    menu = keyboard_messages(messages)[-1]
-    labels = [button.text for row in menu.reply_markup.inline_keyboard for button in row]
-    assert "📅 В этом месяце" in labels
-    assert "📋 Все задачи" in labels
-    assert "🗓 Долгосрочные" not in labels
-    assert "📥 Без срока" in labels
-    assert "🌀 Inbox" not in labels
-    assert "💭 Когда-нибудь" not in labels
-
-    await harness.click_button(DEFAULT_USER_ID, menu, "Все задачи")
-    assert "📋 Все задачи" in (harness.current(menu).text or "")
-
-    # Кнопка месяца открывает список (классический обработчик TaskListCB).
-    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
-    menu = keyboard_messages(messages)[-1]
-    await harness.click_button(DEFAULT_USER_ID, menu, "В этом месяце")
-    assert "📅 В этом месяце" in (harness.current(menu).text or "")
-
-
-# 22. Категории документов: назначение из карточки и просмотр по категории.
-async def test_scenario_document_category_flow(classic_settings, session_factory, session):
-    harness = await make_harness(classic_settings, session_factory, ai=FakeProvider())
-    messages = await harness.send_document(
-        DEFAULT_USER_ID, filename="passport.pdf", content=b"%PDF-1.4 data"
-    )
-    await confirm_last(harness, DEFAULT_USER_ID, messages)
-    await session.commit()
-    session.expire_all()
-
-    assert len(await DocumentRepository(session).list_active()) == 1
-
-    messages = await harness.send_text(DEFAULT_USER_ID, "/documents")
-    list_message = keyboard_messages(messages)[-1]
-
-    # Список -> карточка -> пикер: всё правит одно сообщение.
-    card_messages = await harness.click_button(DEFAULT_USER_ID, list_message, "1. passport")
-    assert card_messages == []
-    card_view = harness.current(list_message)
-    assert "Документ:" in (card_view.text or "")
-
-    picker_messages = await harness.click_button(DEFAULT_USER_ID, card_view, "Категория")
-    assert picker_messages == []
-    picker_message = harness.current(list_message)
-    assert "Выберите категорию для документа" in (picker_message.text or "")
-
-    # «⬅️ Назад» возвращает карточку в то же сообщение.
-    back_messages = await harness.click_button(DEFAULT_USER_ID, picker_message, "Назад")
-    assert back_messages == []
-    card_view = harness.current(list_message)
-    assert "Документ:" in (card_view.text or "")
-
-    await harness.click_button(DEFAULT_USER_ID, card_view, "Категория")
-    picker_message = harness.current(list_message)
-    proposal = await harness.click_button(DEFAULT_USER_ID, picker_message, "Работа")
-    assert any("Обновить документ?" in (m.text or "") for m in proposal)
-    await confirm_last(harness, DEFAULT_USER_ID, proposal)
-    await session.commit()
-    session.expire_all()
-
-    document = (await DocumentRepository(session).list_active())[0]
-    category = await CategoryRepository(session).find_by_name("Работа")
-    assert document.category_id == category.id
-
-    # Просмотр по категории: навигация правит то же сообщение.
-    messages = await harness.send_text(DEFAULT_USER_ID, "/documents")
-    list_message = keyboard_messages(messages)[-1]
-    category_list = await harness.click_button(
-        DEFAULT_USER_ID, list_message, "По категориям"
-    )
-    assert category_list == []
-    category_menu = harness.current(list_message)
-    assert "Документы по категориям" in (category_menu.text or "")
-
-    filtered = await harness.click_button(DEFAULT_USER_ID, category_menu, "Работа")
-    assert filtered == []
-    assert "passport" in (harness.current(list_message).text or "")

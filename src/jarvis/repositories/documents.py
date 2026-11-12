@@ -43,14 +43,11 @@ class DocumentRepository:
         *,
         limit: int = 10,
         offset: int = 0,
-        category_id: uuid.UUID | None = None,
         allowed_sensitivities: list[Sensitivity] | None = None,
     ) -> list[Document]:
         stmt = select(Document).where(
             Document.deleted_at.is_(None), Document.status == DocumentStatus.ACTIVE
         )
-        if category_id is not None:
-            stmt = stmt.where(Document.category_id == category_id)
         if allowed_sensitivities is not None:
             stmt = stmt.where(Document.sensitivity.in_(allowed_sensitivities))
         stmt = stmt.order_by(Document.created_at.desc()).limit(limit).offset(offset)

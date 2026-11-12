@@ -14,12 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from jarvis import __version__
 from jarvis.ai import NoneProvider, create_ai_provider
 from jarvis.bot.app import create_bot, create_dispatcher, setup_bot_commands
-from jarvis.bot.chatlog import RecordingAiohttpSession, build_out_recorder
 from jarvis.config.settings import Settings, get_settings
-from jarvis.db.session import create_engine, create_session_factory, session_scope
+from jarvis.db.session import create_engine, create_session_factory
 from jarvis.health import create_health_app
 from jarvis.logging_setup import setup_logging
-from jarvis.services.catalog import CatalogService
 from jarvis.transcription import create_transcription_provider
 from jarvis.workers.cleanup import cleanup_loop
 from jarvis.workers.notifier import notifier_loop
@@ -80,11 +78,6 @@ async def amain() -> int:
     session_factory = create_session_factory(engine)
     await wait_for_db(engine)
 
-    async with session_scope(session_factory) as session:
-        created = await CatalogService(session).ensure_defaults()
-        if created:
-            log.info("seeded %s default categories", created)
-
     health_app = create_health_app(session_factory)
     server = uvicorn.Server(
         uvicorn.Config(
@@ -114,8 +107,6 @@ async def amain() -> int:
     polling_task = None
     if settings.bot_token and settings.telegram_allowed_user_ids:
         bot = create_bot(settings)
-        if isinstance(bot.session, RecordingAiohttpSession):
-            bot.session.recorder = build_out_recorder(session_factory, settings)
         dispatcher = create_dispatcher(settings, session_factory, ai, transcription, bot=bot)
         await setup_bot_commands(bot)
         polling_task = asyncio.create_task(

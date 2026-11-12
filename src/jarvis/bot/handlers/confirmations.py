@@ -25,9 +25,6 @@ _NAV_AFTER: dict[PendingOpType, tuple[str, str]] = {
     PendingOpType.DELETE_TASK: ("📋 К спискам", "tasks"),
     PendingOpType.DELETE_KNOWLEDGE: ("📚 К списку", "knowledge"),
     PendingOpType.DELETE_DOCUMENT: ("📄 К списку", "documents"),
-    PendingOpType.CREATE_CATEGORY: ("⚙️ Настройки", "settings"),
-    PendingOpType.RENAME_CATEGORY: ("⚙️ Настройки", "settings"),
-    PendingOpType.CREATE_PROJECT: ("🗂 Проекты", "projects"),
     PendingOpType.CREATE_SECRET: ("🔐 Секреты", "secrets"),
     PendingOpType.DELETE_SECRET: ("🔐 Секреты", "secrets"),
 }

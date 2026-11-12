@@ -16,7 +16,6 @@ from jarvis.db.models import AuditLog
 from jarvis.domain.enums import KnowledgeType, Sensitivity
 from jarvis.mcp.server import create_mcp_http_app, create_mcp_server
 from jarvis.repositories.knowledge import KnowledgeRepository
-from jarvis.repositories.projects import ProjectRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import SecretCreateDraft
 from jarvis.services.secrets import SecretService
@@ -54,8 +53,7 @@ async def test_mcp_tools_respect_policy(test_settings, session_factory, session)
         content="чувствительные детали",
         sensitivity=Sensitivity.SENSITIVE,
     )
-    project = await ProjectRepository(session).create(name="Jarvis", description="Личная ОС")
-    await TaskRepository(session).create(title="Настроить MCP", project_id=project.id)
+    await TaskRepository(session).create(title="Настроить MCP")
 
     secrets_service = SecretService(session, test_settings)
     encrypted_b64, key_version = secrets_service.encrypt_value("super-secret-token")
@@ -90,22 +88,17 @@ async def test_mcp_tools_respect_policy(test_settings, session_factory, session)
     assert result["count"] == 0
     assert result["results"] == []
 
-    # 5. Контекст проекта.
-    result = await call_tool(server, "get_project_context", {"project_name": "jarvis"})
-    assert result["project"]["name"] == "Jarvis"
-    assert any(item["title"] == "Настроить MCP" for item in result["tasks"])
-
-    # 6. Список задач по динамическому списку.
+    # 5. Список задач по динамическому списку.
     result = await call_tool(server, "search_tasks", {"view": "no_group"})
     assert any(item["title"] == "Настроить MCP" for item in result["results"])
 
-    # 7. Аудит MCP пишется без содержимого.
+    # 6. Аудит MCP пишется без содержимого.
     audit_count = await session.scalar(
         select(func.count()).select_from(AuditLog).where(AuditLog.actor == "mcp")
     )
     assert audit_count >= 5
 
-    # 8. С MCP_INCLUDE_SENSITIVE=true чувствительная запись доступна, секрет — нет.
+    # 7. С MCP_INCLUDE_SENSITIVE=true чувствительная запись доступна, секрет — нет.
     open_settings = make_mcp_settings(test_settings, include_sensitive=True)
     open_server = create_mcp_server(open_settings, session_factory)
     result = await call_tool(open_server, "get_knowledge_item", {"item_id": str(sensitive.id)})

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -23,8 +23,6 @@ class InterpreterContext:
 
     now: datetime
     tz_name: str
-    categories: list[str] = field(default_factory=list)
-    projects: list[str] = field(default_factory=list)
     active_flow: str | None = None
     draft: dict[str, Any] | None = None
     session_id: str | None = None  # для x-opencode-session (prompt caching)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from aiogram import Router
@@ -436,53 +436,10 @@ async def cmd_export_issues(
     )
 
 
-_CHAT_EXPORT_USAGE = "Формат: <code>/export_chat [YYYY-MM-DD]</code> (по умолчанию — сегодня)."
-
-
-async def cmd_export_chat(
-    message: Message, session: AsyncSession, settings: Settings
-) -> None:
-    """Выгрузить журнал диалога за день в Markdown + JSON (как backlog)."""
-    from jarvis.services.chatlog import export_chat_day
-
-    day = datetime.now(settings.tz).date()
-    tokens = (message.text or "").split()
-    if len(tokens) > 1:
-        try:
-            day = date.fromisoformat(tokens[1])
-        except ValueError:
-            await message.answer("Не понял дату.\n\n" + _CHAT_EXPORT_USAGE)
-            return
-
-    result = await export_chat_day(session, settings, day)
-    paths = _write_export_files(
-        settings,
-        f"jarvis_chat_{day.strftime('%Y%m%d')}",
-        result.markdown,
-        result.json_text,
-    )
-    if paths is None:
-        await message.answer(
-            "❌ Не удалось сохранить файлы экспорта (нет доступа к каталогу). "
-            "Подробности — в логах контейнера."
-        )
-        return
-    md_path, json_path = paths
-
-    truncation = " (показаны первые 2000)" if result.truncated else ""
-    await message.answer(
-        f"📤 Чат за {day.isoformat()}: {result.message_count} сообщений{truncation}. "
-        "Текст уже с маскировкой секретов."
-    )
-    await message.answer_document(FSInputFile(md_path))
-    await message.answer_document(FSInputFile(json_path))
-
-
 def build_router() -> Router:
     router = Router(name="diagnostics")
     router.message.register(cmd_diagnostics, Command("diagnostics", "status"))
     router.message.register(cmd_export_issues, Command("export_issues"))
-    router.message.register(cmd_export_chat, Command("export_chat"))
     router.callback_query.register(menu_diagnostics, MenuCBFilter("diagnostics"))
     router.callback_query.register(backlog_list_action, ImpListCB.filter())
     router.callback_query.register(imp_action, ImpCB.filter())
