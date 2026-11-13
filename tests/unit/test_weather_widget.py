@@ -78,3 +78,10 @@ def test_caption_is_truncated():
     payload = render_weather_widget(_snapshot(), caption="я" * 2000)
     assert len(payload.caption) <= 1024
     assert payload.caption.endswith("/today")
+
+
+def test_rich_fallback_contains_weather_and_caption():
+    payload = render_weather_widget(_snapshot(), caption="Доброе утро! Задачи на сегодня")
+    assert payload.rich_html is not None
+    assert "<h3>Погода · Москва</h3>" in payload.rich_html
+    assert "Доброе утро! Задачи на сегодня" in payload.rich_html

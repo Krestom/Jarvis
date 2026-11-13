@@ -631,3 +631,8 @@ Issue [#2006](https://github.com/aiogram/aiogram/issues/2006) открыт.
 2. удалить `tests/unit/test_aiogram_widget_watch.py` (canary специально
    упадёт и напомнит);
 3. обновить этот раздел и `docs/status.md`.
+
+Текущий статус (2026-11-13): прод-бот получает
+`INPUT_MEDIA_WIDGET_NOT_ALLOWED` даже на минимальный `sendWidget`, поэтому
+используется rich-message fallback (`bot/widgets/send.py`). Это rollout
+Telegram, а не ошибка HTML: когда виджеты разрешат, код переключится сам.

@@ -13,6 +13,9 @@ class WidgetPayload:
     caption: str
     width: int = 0
     height: int = 0
+    # Rich-message fallback: нативный структурированный вид, если Telegram
+    # отклоняет виджет (INPUT_MEDIA_WIDGET_NOT_ALLOWED).
+    rich_html: str | None = None
 
 
 __all__ = ["WidgetPayload"]

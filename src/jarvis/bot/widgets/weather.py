@@ -211,6 +211,38 @@ def _short_caption(snapshot: WeatherSnapshot) -> str:
     )
 
 
+def _rich_message(snapshot: WeatherSnapshot, *, caption: str | None) -> str:
+    """Нативная rich-карточка — fallback, если Telegram отклоняет виджет."""
+    today = snapshot.daily[0]
+    label, _ = describe_weather_code(snapshot.current.weather_code)
+    rows = (
+        ("Ощущается", f"{round(snapshot.current.feels_like_c)}°"),
+        ("Ветер", f"{round(snapshot.current.wind_speed_ms)} м/с"),
+        ("Влажность", f"{snapshot.current.humidity_pct}%"),
+        ("Осадки", f"{today.precipitation_probability_pct}%"),
+    )
+    table = "".join(
+        f"<tr><td>{name}</td><td><b>{value}</b></td></tr>" for name, value in rows
+    )
+    hours = " · ".join(
+        f"{point.time:%H:%M} {round(point.temperature_c)}°"
+        for point in snapshot.hourly[:HOURS_IN_WIDGET]
+    )
+    parts = [
+        f"<h3>Погода · {html_lib.escape(snapshot.city)}</h3>",
+        f"<p><b>{round(snapshot.current.temperature_c)}°</b>, "
+        f"{html_lib.escape(label).lower()}. Макс. {round(today.high_c)}°, "
+        f"мин. {round(today.low_c)}°.</p>",
+        f"<table>{table}</table>",
+        f"<p>{hours}</p>",
+        f"<p>Восход {today.sunrise:%H:%M} · Закат {today.sunset:%H:%M}</p>",
+        "<p><i>Open-Meteo</i></p>",
+    ]
+    if caption:
+        parts.append(f"<p>{html_lib.escape(caption.strip())}</p>")
+    return "".join(parts)
+
+
 def render_weather_widget(
     snapshot: WeatherSnapshot, *, caption: str | None = None
 ) -> WidgetPayload:
@@ -249,7 +281,10 @@ def render_weather_widget(
     text = (caption or _short_caption(snapshot)).strip()
     if len(text) > CAPTION_LIMIT:
         text = text[: CAPTION_LIMIT - 8].rstrip() + "… /today"
-    return WidgetPayload(html=html, caption=text, width=360)
+    rich = _rich_message(snapshot, caption=text if caption is not None else None)
+    return WidgetPayload(
+        html=html, caption=text, width=360, rich_html=rich
+    )
 
 
 __all__ = ["WidgetTooLarge", "render_weather_widget"]
