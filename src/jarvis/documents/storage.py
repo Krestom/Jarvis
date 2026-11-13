@@ -113,7 +113,9 @@ class EncryptedFileStorage:
         """Перевести staged-файл в основное хранилище (после подтверждения)."""
         staging_path = self._staging() / f"{storage_key}.enc"
         if not staging_path.exists():
-            return  # уже в основном хранилище
+            if self._path_for(storage_key).exists():
+                return  # уже в основном хранилище
+            raise StorageError("file not found")
         target = self._path_for(storage_key)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(staging_path), str(target))

@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     document_encryption_key_version: int = 1
     document_encryption_old_keys: str = ""
     secrets_encryption_key: SecretStr = SecretStr("")
+    secrets_encryption_key_version: int = 1
+    secrets_encryption_old_keys: str = ""
     max_document_bytes: int = 50 * 1024 * 1024
     max_voice_bytes: int = 20 * 1024 * 1024
 
@@ -181,8 +183,8 @@ class Settings(BaseSettings):
         if dedicated:
             return keyring_from_config(
                 active_key=dedicated,
-                active_version=self.document_encryption_key_version,
-                old_keys=self.document_encryption_old_keys,
+                active_version=self.secrets_encryption_key_version,
+                old_keys=self.secrets_encryption_old_keys,
             )
         return self.document_keyring()
 
@@ -204,6 +206,16 @@ class Settings(BaseSettings):
             problems.append(
                 "TELEGRAM_ALLOWED_USER_IDS is empty: the bot would deny everyone"
             )
+        if self.has_document_key:
+            try:
+                self.document_keyring()
+            except ValueError as error:
+                problems.append(f"DOCUMENT_ENCRYPTION_KEY is invalid: {error}")
+        if self.secrets_encryption_key.get_secret_value():
+            try:
+                self.secrets_keyring()
+            except ValueError as error:
+                problems.append(f"SECRETS_ENCRYPTION_KEY is invalid: {error}")
         return problems
 
     def mcp_config_problems(self) -> list[str]:
@@ -212,6 +224,11 @@ class Settings(BaseSettings):
             problems.append("MCP_AUTH_TOKEN is not set")
         if not self.has_document_key and self.mcp_include_sensitive:
             problems.append("DOCUMENT_ENCRYPTION_KEY is required for sensitive MCP access")
+        if self.has_document_key:
+            try:
+                self.document_keyring()
+            except ValueError as error:
+                problems.append(f"DOCUMENT_ENCRYPTION_KEY is invalid: {error}")
         return problems
 
 

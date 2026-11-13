@@ -62,10 +62,18 @@ async def test_document_full_lifecycle(session, test_settings):
     )
     assert again.id == document.id
 
-    # Удаление убирает и метаданные, и файл.
+    # Удаление: запись скрывается сразу, файл убирает cleanup после коммита.
     await service.delete(document.id)
     assert await DocumentRepository(session).get(document.id) is None
+    assert storage._path_for(document.storage_key).exists()
+    await service.purge_deleted_files(datetime.now(UTC) + timedelta(hours=1))
     assert not storage._path_for(document.storage_key).exists()
+
+
+async def test_promote_missing_staging_file_raises(tmp_path):
+    storage = make_storage(tmp_path)
+    with pytest.raises(StorageError):
+        storage.promote("ab" + "0" * 46)
 
 
 async def test_storage_tamper_and_wrong_key(tmp_path):

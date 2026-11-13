@@ -124,7 +124,7 @@ docker network rm jarvis-restore-test-net
 
 ## Ключи шифрования — храните отдельно
 
-Файлы в томе и часть полей в БД зашифрованы мастер-ключами `DOCUMENT_ENCRYPTION_KEY` и `SECRETS_ENCRYPTION_KEY` (а также ключами предыдущих версий `DOCUMENT_ENCRYPTION_OLD_KEYS`). Эти ключи есть только в `.env` на сервере.
+Файлы в томе и часть полей в БД зашифрованы мастер-ключами `DOCUMENT_ENCRYPTION_KEY` и `SECRETS_ENCRYPTION_KEY` (а также ключами предыдущих версий `DOCUMENT_ENCRYPTION_OLD_KEYS` и `SECRETS_ENCRYPTION_OLD_KEYS`). Эти ключи есть только в `.env` на сервере.
 
 - В резервные копии ключи **не попадают** (`env.sanitized` их маскирует) — это сделано намеренно.
 - Без `DOCUMENT_ENCRYPTION_KEY` файлы из `files.tar.gz` восстановить **невозможно**: это не вопрос скрипта, шифротекст без ключа бесполезен.

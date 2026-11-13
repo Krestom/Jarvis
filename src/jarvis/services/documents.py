@@ -80,7 +80,12 @@ class DocumentService:
             raise NotFoundError("Документ не найден (возможно, устарел)")
         if document.status == DocumentStatus.ACTIVE:
             return document  # идемпотентно
-        self._storage.promote(document.storage_key)
+        try:
+            self._storage.promote(document.storage_key)
+        except StorageError as error:
+            raise OperationError(
+                "Файл документа не найден — загрузите его заново"
+            ) from error
         await self._repo.update(
             document,
             title=draft.title,
@@ -112,9 +117,19 @@ class DocumentService:
         document = await self._repo.get(document_id)
         if document is None:
             raise NotFoundError("Документ не найден")
-        self._storage.delete(document.storage_key)
+        # Файл удаляет cleanup после коммита soft-delete: иначе сбой commit
+        # оставляет активную запись без файла.
         await self._repo.soft_delete(document)
         return document.id
+
+    async def purge_deleted_files(self, older_than) -> int:
+        """Удалить файлы документов, чьё soft-delete уже закоммичено."""
+        purged = 0
+        for document in await self._repo.list_deleted_before(older_than):
+            self._storage.delete(document.storage_key)
+            await self._repo.hard_delete(document)
+            purged += 1
+        return purged
 
     async def purge_stale_pending(self, older_than) -> int:
         """Убрать неподтверждённые документы и их файлы (вызывается воркером)."""

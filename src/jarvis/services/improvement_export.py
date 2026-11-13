@@ -53,7 +53,7 @@ async def export_backlog(
     items = await repo.list_items(
         statuses=statuses, category=category, limit=EXPORT_MAX_ITEMS
     )
-    events = {item.id: await repo.list_events(item.id) for item in items}
+    events = await repo.list_events_for([item.id for item in items])
     generated_at = datetime.now(tz)
 
     payload = {
@@ -64,7 +64,9 @@ async def export_backlog(
             "category": category.value if category else None,
         },
         "count": len(items),
-        "items": [_item_payload(item, events[item.id]) for item in items],
+        "items": [
+            _item_payload(item, events.get(item.id, [])) for item in items
+        ],
     }
     json_text = json.dumps(_clean(payload), ensure_ascii=False, indent=2, default=str)
     markdown = _render_markdown(items, events, generated_at=generated_at)

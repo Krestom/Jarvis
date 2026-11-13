@@ -58,10 +58,6 @@ def _snippet(text: str | None) -> str:
 class _Serializer:
     """Сериализация сущностей в безопасный вид для MCP."""
 
-    def __init__(self, session: AsyncSession, allowed: list[Sensitivity]) -> None:
-        self._session = session
-        self._allowed = allowed
-
     async def knowledge(self, item, *, include_content: bool = False) -> dict[str, Any]:
         data: dict[str, Any] = {
             "id": str(item.id),
@@ -113,7 +109,7 @@ def register_tools(
             items = await KnowledgeRepository(session).search(
                 query, limit=limit, allowed_sensitivities=allowed
             )
-            serializer = _Serializer(session, allowed)
+            serializer = _Serializer()
             results = [await serializer.knowledge(item) for item in items]
             await _audit(session, "search_knowledge", len(results))
             return {"query": query, "count": len(results), "results": results}
@@ -133,7 +129,7 @@ def register_tools(
                 types=[KnowledgeType.INSTRUCTION],
                 allowed_sensitivities=allowed,
             )
-            serializer = _Serializer(session, allowed)
+            serializer = _Serializer()
             results = [await serializer.knowledge(item) for item in items]
             await _audit(session, "search_instructions", len(results))
             return {"query": query, "count": len(results), "results": results}
@@ -153,7 +149,7 @@ def register_tools(
             if item is None or item.sensitivity not in allowed:
                 await _audit(session, "get_knowledge_item", 0)
                 return {"error": "not_found"}
-            serializer = _Serializer(session, allowed)
+            serializer = _Serializer()
             result = await serializer.knowledge(item, include_content=True)
             await _audit(session, "get_knowledge_item", 1)
             return result
@@ -181,7 +177,7 @@ def register_tools(
                 tasks = await TaskService(session).list_view(
                     view, now=datetime.now(UTC), tz=settings.tz, limit=limit
                 )
-            serializer = _Serializer(session, allowed)
+            serializer = _Serializer()
             results = [serializer.task(task) for task in tasks]
             await _audit(session, "search_tasks", len(results))
             return {"count": len(results), "results": results}

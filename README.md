@@ -190,7 +190,7 @@ TRANSCRIPTION_MODEL=whisper-large-v3
 
 Read-only, статический bearer-токен, доступ через ssh-туннель; секреты и
 содержимое документов недоступны никогда. Инструменты: `search_knowledge`,
-`search_instructions`, `get_knowledge_item`, `search_tasks`, `find_related`.
+`search_instructions`, `get_knowledge_item`, `search_tasks`.
 
 Инструкция и пример конфига: [docs/mcp.md](docs/mcp.md),
 [examples/opencode.mcp.jsonc](examples/opencode.mcp.jsonc).

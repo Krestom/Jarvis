@@ -77,6 +77,13 @@ class DocumentRepository:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def list_deleted_before(self, moment) -> list[Document]:
+        stmt = select(Document).where(
+            Document.deleted_at.is_not(None),
+            Document.deleted_at < moment,
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
     async def hard_delete(self, document: Document) -> None:
         await self._session.delete(document)
         await self._session.flush()

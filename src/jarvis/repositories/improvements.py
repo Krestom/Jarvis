@@ -186,6 +186,22 @@ class ImprovementRepository:
         )
         return list(result.scalars().all())
 
+    async def list_events_for(
+        self, item_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, list[ImprovementEvent]]:
+        """События всех записей одним запросом (экспорт без N+1)."""
+        if not item_ids:
+            return {}
+        result = await self._session.execute(
+            select(ImprovementEvent)
+            .where(ImprovementEvent.item_id.in_(item_ids))
+            .order_by(ImprovementEvent.occurred_at, ImprovementEvent.id)
+        )
+        grouped: dict[uuid.UUID, list[ImprovementEvent]] = {}
+        for event in result.scalars().all():
+            grouped.setdefault(event.item_id, []).append(event)
+        return grouped
+
     async def merge_into(
         self, target: ImprovementItem, sources: list[ImprovementItem]
     ) -> ImprovementItem:

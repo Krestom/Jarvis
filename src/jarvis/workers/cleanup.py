@@ -21,6 +21,25 @@ log = logging.getLogger(__name__)
 CLEANUP_INTERVAL_SECONDS = 600
 STAGED_PENDING_TTL_HOURS = 24
 RESOLVED_OPS_TTL_DAYS = 7
+EXPORT_FILES_TTL_DAYS = 7
+
+
+def purge_export_files(settings: Settings, older_than: datetime) -> int:
+    """Удалить старые выгрузки backlog из EXPORT_DIR."""
+    directory = settings.export_dir
+    if not directory.exists():
+        return 0
+    cutoff = older_than.timestamp()
+    purged = 0
+    for path in directory.iterdir():
+        try:
+            if not path.is_file() or path.stat().st_mtime >= cutoff:
+                continue
+            path.unlink()
+            purged += 1
+        except OSError:
+            pass
+    return purged
 
 
 async def run_cleanup_once(
@@ -45,6 +64,9 @@ async def run_cleanup_once(
             stats["staged_documents_purged"] = await DocumentService(
                 session, settings, storage
             ).purge_stale_pending(now - timedelta(hours=STAGED_PENDING_TTL_HOURS))
+            stats["deleted_documents_purged"] = await DocumentService(
+                session, settings, storage
+            ).purge_deleted_files(now - timedelta(hours=STAGED_PENDING_TTL_HOURS))
             orphaned = 0
             for path in storage.list_staging_files_older_than(
                 now - timedelta(hours=STAGED_PENDING_TTL_HOURS)
@@ -55,6 +77,9 @@ async def run_cleanup_once(
                 except OSError:
                     pass
             stats["orphaned_staging_files"] = orphaned
+        stats["export_files_purged"] = purge_export_files(
+            settings, now - timedelta(days=EXPORT_FILES_TTL_DAYS)
+        )
     return stats
 
 

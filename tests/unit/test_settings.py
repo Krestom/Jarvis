@@ -55,6 +55,31 @@ def test_document_keyring_rejects_non_base64() -> None:
         settings.document_keyring()
 
 
+def test_bot_config_reports_invalid_document_key() -> None:
+    settings = make_settings(document_encryption_key="not base64!!!")
+    assert any(
+        "DOCUMENT_ENCRYPTION_KEY is invalid" in problem
+        for problem in settings.bot_config_problems()
+    )
+
+
+def test_bot_config_reports_invalid_secrets_key() -> None:
+    settings = make_settings(secrets_encryption_key="not base64!!!")
+    assert any(
+        "SECRETS_ENCRYPTION_KEY is invalid" in problem
+        for problem in settings.bot_config_problems()
+    )
+
+
+def test_secrets_keyring_uses_own_version() -> None:
+    other = base64.urlsafe_b64encode(bytes(range(32, 64))).decode()
+    settings = make_settings(
+        secrets_encryption_key=other,
+        secrets_encryption_key_version=3,
+    )
+    assert settings.secrets_keyring().active_version == 3
+
+
 def test_secrets_keyring_falls_back_to_document_key() -> None:
     settings = make_settings(secrets_encryption_key="")
     assert settings.secrets_keyring().keys == settings.document_keyring().keys

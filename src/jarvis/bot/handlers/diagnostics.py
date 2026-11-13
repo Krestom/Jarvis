@@ -31,17 +31,10 @@ from jarvis.config.settings import Settings
 from jarvis.conversation.preview import fmt_dt_local
 from jarvis.db.models import Document, ImprovementItem, KnowledgeItem, Secret, Task
 from jarvis.domain.enums import ImprovementCategory, ImprovementStatus
-from jarvis.repositories.improvements import ImprovementRepository
+from jarvis.repositories.improvements import OPEN_STATUSES, ImprovementRepository
 from jarvis.services.improvement_export import export_backlog
 
 log = logging.getLogger(__name__)
-
-# «Открытые» — записи, которые ещё требуют внимания.
-OPEN_STATUSES = (
-    ImprovementStatus.NEW,
-    ImprovementStatus.REVIEWED,
-    ImprovementStatus.PLANNED,
-)
 
 _EXPORT_USAGE = (
     "Формат: <code>/export_issues [status=...] [category=...]</code>\n"

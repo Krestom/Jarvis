@@ -83,7 +83,9 @@ sudo usermod -aG docker "$USER"   # затем перелогиниться
    Нужен Python 3.12+ и пакет `cryptography` (например,
    `python -m venv .venv && . .venv/bin/activate && pip install cryptography`).
    Скопировать в `.env` строки `DOCUMENT_ENCRYPTION_KEY`,
-   `DOCUMENT_ENCRYPTION_KEY_VERSION` и `SECRETS_ENCRYPTION_KEY`.
+   `DOCUMENT_ENCRYPTION_KEY_VERSION`, `SECRETS_ENCRYPTION_KEY` и
+   `SECRETS_ENCRYPTION_KEY_VERSION` (для существующих секретов — та же версия,
+   с которой они были сохранены; обычно 1).
    **Сохранить копию ключей в надёжном месте** — без них зашифрованные
    документы и секреты не восстанавливаются.
 

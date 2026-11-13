@@ -112,7 +112,8 @@ async def secret_action(
         message = await answer_safe(
             callback.message,
             f"👁 <b>{esc(secret.name)}</b>\n<code>{esc(value)}</code>\n\n"
-            "<i>Сообщение будет удалено через 90 секунд. Не пересылайте его.</i>",
+            "<i>Попробую удалить сообщение через 90 секунд. Если бот "
+            "перезапустится — удалите его сами.</i>",
         )
         asyncio.create_task(_delete_later(message, REVEAL_LIFETIME_SECONDS))
         return
