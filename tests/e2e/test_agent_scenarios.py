@@ -403,7 +403,7 @@ async def test_agent_opens_weather_screen(
 
     widgets = [m for m in messages if (m.model_extra or {}).get("widget")]
     assert len(widgets) == 1
-    assert "Open-Meteo" in widgets[0].model_extra["widget"]["html"]
+    assert "Москва" in widgets[0].model_extra["widget"]["html"]
 
 
 async def test_agent_opens_search_screen(test_settings, session_factory, session):

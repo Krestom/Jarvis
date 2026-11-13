@@ -85,3 +85,5 @@ def test_rich_fallback_contains_weather_and_caption():
     assert payload.rich_html is not None
     assert "<h3>Погода · Москва</h3>" in payload.rich_html
     assert "Доброе утро! Задачи на сегодня" in payload.rich_html
+    assert "Open-Meteo" not in payload.rich_html
+    assert "Open-Meteo" not in payload.html

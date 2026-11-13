@@ -132,7 +132,6 @@ font-size:10px;color:rgba(255,255,255,.62)}
 .foot div{display:flex;align-items:center;gap:6px}
 .foot b{font-size:12px;font-weight:600;color:#fff}
 .sm{width:15px;height:15px;color:rgba(255,255,255,.8);flex:none}
-.src{margin-top:8px;font-size:10px;color:rgba(255,255,255,.45)}
 svg{display:block}
 </style>
 <div class="w {{sky}}">
@@ -154,7 +153,6 @@ svg{display:block}
 <div>{{rise}}<span>Восход</span><b>{{sunrise}}</b></div>
 <div>{{set}}<span>Закат</span><b>{{sunset}}</b></div>
 </div>
-<div class="src">Open-Meteo</div>
 </div>"""
 
 
@@ -207,7 +205,7 @@ def _short_caption(snapshot: WeatherSnapshot) -> str:
     label, _ = describe_weather_code(snapshot.current.weather_code)
     return (
         f"Погода в {snapshot.city} · {round(snapshot.current.temperature_c)}°, "
-        f"{label.lower()} · Open-Meteo"
+        f"{label.lower()}"
     )
 
 
@@ -215,28 +213,24 @@ def _rich_message(snapshot: WeatherSnapshot, *, caption: str | None) -> str:
     """Нативная rich-карточка — fallback, если Telegram отклоняет виджет."""
     today = snapshot.daily[0]
     label, _ = describe_weather_code(snapshot.current.weather_code)
-    rows = (
-        ("Ощущается", f"{round(snapshot.current.feels_like_c)}°"),
-        ("Ветер", f"{round(snapshot.current.wind_speed_ms)} м/с"),
-        ("Влажность", f"{snapshot.current.humidity_pct}%"),
-        ("Осадки", f"{today.precipitation_probability_pct}%"),
-    )
-    table = "".join(
-        f"<tr><td>{name}</td><td><b>{value}</b></td></tr>" for name, value in rows
-    )
     hours = " · ".join(
         f"{point.time:%H:%M} {round(point.temperature_c)}°"
         for point in snapshot.hourly[:HOURS_IN_WIDGET]
+    )
+    details = (
+        f"<p>Ощущается <b>{round(snapshot.current.feels_like_c)}°</b> · "
+        f"Ветер <b>{round(snapshot.current.wind_speed_ms)} м/с</b> · "
+        f"Влажность <b>{snapshot.current.humidity_pct}%</b> · "
+        f"Осадки <b>{today.precipitation_probability_pct}%</b></p>"
     )
     parts = [
         f"<h3>Погода · {html_lib.escape(snapshot.city)}</h3>",
         f"<p><b>{round(snapshot.current.temperature_c)}°</b>, "
         f"{html_lib.escape(label).lower()}. Макс. {round(today.high_c)}°, "
         f"мин. {round(today.low_c)}°.</p>",
-        f"<table>{table}</table>",
+        details,
         f"<p>{hours}</p>",
         f"<p>Восход {today.sunrise:%H:%M} · Закат {today.sunset:%H:%M}</p>",
-        "<p><i>Open-Meteo</i></p>",
     ]
     if caption:
         parts.append(f"<p>{html_lib.escape(caption.strip())}</p>")

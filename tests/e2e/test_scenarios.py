@@ -1136,4 +1136,4 @@ async def test_weather_command_sends_widget(
     sent = [request for request in harness.session.requests if isinstance(request, SendWidget)]
     assert len(sent) == 1
     assert sent[0].caption and "Погода" in sent[0].caption
-    assert "Open-Meteo" in sent[0].html
+    assert "Москва" in sent[0].html
