@@ -16,6 +16,7 @@ from jarvis.bot.handlers.open_entity import (
 )
 from jarvis.bot.handlers.render import send_or_edit, send_search_results
 from jarvis.bot.keyboards import main_menu
+from jarvis.bot.rich import send_rich_text
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 
@@ -60,7 +61,7 @@ async def search_action(
             text, markup = await render_document_card(session, entity_id)
         await callback.answer()
         if text is None:
-            await callback.message.answer("Запись не найдена.", reply_markup=main_menu())
+            await send_rich_text(callback.message, "Запись не найдена.", main_menu())
             return
         # Карточка заменяет результаты поиска в том же сообщении.
         if markup is not None:

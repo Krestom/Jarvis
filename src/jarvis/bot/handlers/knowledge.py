@@ -7,14 +7,11 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.bot.callbacks import KbCB, KbListCB, uuid_hex
-from jarvis.bot.handlers.open_entity import parse_hex_uuid, render_knowledge_card
-from jarvis.bot.handlers.render import send_or_edit, send_search_results
-from jarvis.bot.keyboards import (
-    PAGE_SIZE,
-    knowledge_card_keyboard,
-    knowledge_list_keyboard,
-    main_menu,
-)
+from jarvis.bot.handlers.open_entity import parse_hex_uuid
+from jarvis.bot.handlers.render import send_search_results
+from jarvis.bot.keyboards import PAGE_SIZE, knowledge_card_keyboard, main_menu
+from jarvis.bot.rich import send_rich, send_rich_text
+from jarvis.bot.screens.content import knowledge_card_screen, knowledge_list_screen
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import EngineOutcome
 from jarvis.domain.enums import PendingOpType
@@ -25,25 +22,10 @@ from jarvis.services.search import SearchService
 async def send_knowledge_list(
     message: Message, session: AsyncSession, *, page: int, edit: bool = False
 ) -> None:
-    from jarvis.bot.handlers.render import send_or_edit
-
     repo = KnowledgeRepository(session)
     items = await repo.list_recent(limit=PAGE_SIZE, offset=page * PAGE_SIZE)
-    if not items and page == 0:
-        await send_or_edit(
-            message,
-            "📚 Пока пусто. Напишите заметку — я предложу её сохранить.",
-            markup=main_menu(),
-            edit=edit,
-        )
-        return
-    lines = ["📚 <b>Знания</b> (последние записи)", ""]
-    for index, item in enumerate(items, start=1):
-        lines.append(f"{index}. {item.title}")
-    markup = knowledge_list_keyboard(items, page, has_next=len(items) >= PAGE_SIZE)
-    await send_or_edit(
-        message, "\n".join(lines) + "\n\nВыберите запись:", markup=markup, edit=edit
-    )
+    screen = knowledge_list_screen(items, page, has_next=len(items) >= PAGE_SIZE)
+    await send_rich(message, screen, edit=edit)
 
 
 async def knowledge_page(
@@ -69,15 +51,13 @@ async def knowledge_action(
 
     if callback_data.action in ("view", "full"):
         full = callback_data.action == "full"
-        text, markup = await render_knowledge_card(session, item_id, full=full)
+        item = await KnowledgeRepository(session).get(item_id)
         await callback.answer()
-        if text is None:
-            await callback.message.answer("Запись не найдена.", reply_markup=main_menu())
+        if item is None:
+            await send_rich_text(callback.message, "Запись не найдена.", main_menu())
             return
         # Карточка и полный текст правят сообщение, из которого открыты.
-        await send_or_edit(
-            callback.message, f"{text}\n\nДействия:", markup=markup, edit=True
-        )
+        await send_rich(callback.message, knowledge_card_screen(item, full=full), edit=True)
         return
 
     if callback_data.action == "similar":
@@ -89,10 +69,10 @@ async def knowledge_action(
         hits = [hit for hit in hits if hit.entity_id != item_id]
         await callback.answer()
         if not hits:
-            await send_or_edit(
+            await send_rich_text(
                 callback.message,
                 "Похожих записей не нашлось.",
-                markup=knowledge_card_keyboard(uuid_hex(item.id)),
+                knowledge_card_keyboard(uuid_hex(item.id)),
                 edit=True,
             )
             return

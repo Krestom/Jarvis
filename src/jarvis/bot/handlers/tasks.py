@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from datetime import UTC, date, datetime
 
 from aiogram import Router
@@ -12,23 +11,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import TaskCB, TaskListCB
 from jarvis.bot.formatting import esc
-from jarvis.bot.handlers.open_entity import (
-    parse_hex_uuid,
-    render_comments_view,
-    render_task_card,
+from jarvis.bot.handlers.open_entity import parse_hex_uuid
+from jarvis.bot.handlers.render import (
+    answer_safe,
+    propose_and_send,
+    send_or_edit,
+    send_outcome,
 )
-from jarvis.bot.handlers.render import propose_and_send, send_or_edit, send_outcome
-from jarvis.bot.keyboards import (
-    PAGE_SIZE,
-    main_menu,
-    task_list_keyboard,
-    tasks_menu_keyboard,
+from jarvis.bot.keyboards import PAGE_SIZE, main_menu, tasks_menu_keyboard
+from jarvis.bot.rich import RichScreen, plain_screen, send_rich
+from jarvis.bot.screens.core import (
+    comments_screen,
+    task_card_screen,
+    task_list_screen,
+    tasks_menu_screen,
 )
 from jarvis.bot.ui_state import last_task_list, remember_task_list
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
-from jarvis.conversation.preview import task_list_text, task_view_title
+from jarvis.conversation.preview import task_view_title
 from jarvis.conversation.state import ConversationStore
 from jarvis.domain.enums import PendingOpType
 from jarvis.domain.windows import DONE_STATUSES
@@ -41,12 +43,12 @@ from jarvis.services.tasks import TASK_VIEWS, TaskService
 
 async def build_task_list(
     session: AsyncSession, settings: Settings, view: str, page: int, value: str = ""
-) -> tuple[str, object]:
+) -> RichScreen:
     service = TaskService(session)
     now = datetime.now(UTC)
     day = None
     if view != "date" and view not in TASK_VIEWS:
-        return (
+        return plain_screen(
             "📋 <b>Задачи</b>\nКнопка устарела — выберите список заново.",
             tasks_menu_keyboard(),
         )
@@ -54,7 +56,7 @@ async def build_task_list(
         try:
             day = date.fromisoformat(value)
         except ValueError:
-            return "📋 Дата не распознана — откройте список заново.", main_menu()
+            return plain_screen("📋 Дата не распознана — откройте список заново.", main_menu())
         tasks = await service.list_on_date(
             day, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
         )
@@ -66,25 +68,31 @@ async def build_task_list(
         title = task_view_title(view, now, settings.tz)
         if view == "today":
             day = now.astimezone(settings.tz).date()
-    text = task_list_text(title, tasks, settings.tz, now, day=day)
-    markup = task_list_keyboard(
-        tasks, view, page, has_next=len(tasks) >= PAGE_SIZE, value=value
+    return task_list_screen(
+        title=title,
+        tasks=tasks,
+        tz=settings.tz,
+        now=now,
+        view=view,
+        page=page,
+        value=value,
+        has_next=len(tasks) >= PAGE_SIZE,
+        day=day,
     )
-    return text, markup
 
 
 async def send_task_list(
     message: Message, session: AsyncSession, settings: Settings, *, view: str, page: int
 ) -> None:
-    text, markup = await build_task_list(session, settings, view, page)
+    screen = await build_task_list(session, settings, view, page)
     remember_task_list(message.chat.id, view, page)
-    await send_or_edit(message, f"{text}\n\nВыберите задачу:", markup=markup)
+    await send_rich(message, screen)
 
 
 async def task_list(
     callback: CallbackQuery, callback_data: TaskListCB, session: AsyncSession, settings: Settings
 ) -> None:
-    text, markup = await build_task_list(
+    screen = await build_task_list(
         session, settings, callback_data.view, callback_data.page, callback_data.value
     )
     remember_task_list(
@@ -94,9 +102,7 @@ async def task_list(
         callback_data.value,
     )
     await callback.answer()
-    await send_or_edit(
-        callback.message, f"{text}\n\nВыберите задачу:", markup=markup, edit=True
-    )
+    await send_rich(callback.message, screen, edit=True)
 
 
 async def task_action(
@@ -114,19 +120,12 @@ async def task_action(
         await callback.answer()
         target = last_task_list(callback.message.chat.id)
         if target is None:
-            await send_or_edit(
-                callback.message,
-                "📋 <b>Задачи</b>\nВыберите список:",
-                markup=tasks_menu_keyboard(),
-                edit=True,
-            )
+            await send_rich(callback.message, tasks_menu_screen(), edit=True)
             return
-        text, markup = await build_task_list(
+        screen = await build_task_list(
             session, settings, target.view, target.page, target.value
         )
-        await send_or_edit(
-            callback.message, f"{text}\n\nВыберите задачу:", markup=markup, edit=True
-        )
+        await send_rich(callback.message, screen, edit=True)
         return
 
     if action == "cedit":
@@ -154,15 +153,23 @@ async def task_action(
         if task_id is None:
             await callback.answer("Некорректная задача", show_alert=True)
             return
-        text, markup = await render_task_card(
-            session, settings, task_id, from_list=callback_data.value == "l"
-        )
+        task = await TaskRepository(session).get(task_id)
         await callback.answer()
-        if text is None:
-            await callback.message.answer("Задача не найдена.", reply_markup=main_menu())
+        if task is None:
+            await answer_safe(callback.message, "Задача не найдена.", reply_markup=main_menu())
             return
+        comments = await TaskCommentRepository(session).list_for_task(task.id)
         # Карточка правит сообщение, из которого её открыли (список/пикер/поиск).
-        await send_or_edit(callback.message, f"{text}\n\nДействия:", markup=markup, edit=True)
+        await send_rich(
+            callback.message,
+            task_card_screen(
+                task,
+                comments,
+                settings.tz,
+                from_list=callback_data.value == "l",
+            ),
+            edit=True,
+        )
         return
 
     if task_id is None:
@@ -185,10 +192,13 @@ async def task_action(
         return
 
     if action == "complete":
-        with contextlib.suppress(Exception):
-            await callback.message.edit_reply_markup(reply_markup=None)
         if task.status in DONE_STATUSES:
             await callback.answer("Задача уже закрыта")
+            await send_or_edit(
+                callback.message,
+                f"✅ Задача «{esc(task.title)}» уже закрыта.",
+                edit=True,
+            )
             return
         await TaskService(session).apply_update(task.id, {"status": "done"})
         await AuditRepository(session).log(
@@ -241,12 +251,11 @@ async def task_action(
 
     if action == "comments":
         await callback.answer()
-        text, markup = await render_comments_view(session, settings, task.id)
-        if text is None:
-            await callback.message.answer("Задача не найдена.", reply_markup=main_menu())
-            return
-        await send_or_edit(
-            callback.message, f"{text}\n\nДействия:", markup=markup, edit=True
+        comments = await TaskCommentRepository(session).list_for_task(task.id)
+        await send_rich(
+            callback.message,
+            comments_screen(task, comments, settings.tz),
+            edit=True,
         )
         return
 

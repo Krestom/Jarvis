@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.agent.queue import UserSessionGate
 from jarvis.ai import AIProvider
-from jarvis.bot.keyboards import main_menu, tasks_menu_keyboard
-from jarvis.bot.texts import CANCELLED_TEXT, HELP_TEXT, START_TEXT
+from jarvis.bot.keyboards import main_menu
+from jarvis.bot.rich import send_rich, send_rich_text
+from jarvis.bot.screens.core import help_screen, main_menu_screen, tasks_menu_screen
+from jarvis.bot.texts import CANCELLED_TEXT, START_TEXT
 from jarvis.bot.widgets.send import send_widget
 from jarvis.bot.widgets.weather import WidgetTooLarge, render_weather_widget
 from jarvis.config.settings import Settings
@@ -34,12 +36,15 @@ async def _leave_search(user_id: int, session: AsyncSession, settings: Settings)
 
 async def cmd_start(message: Message, session: AsyncSession, settings: Settings) -> None:
     await _leave_search(message.from_user.id, session, settings)
-    await message.answer(START_TEXT, reply_markup=main_menu())
+    await send_rich(
+        message,
+        main_menu_screen(intro="На связи. Выберите действие:", fallback=START_TEXT),
+    )
 
 
 async def cmd_help(message: Message, session: AsyncSession, settings: Settings) -> None:
     await _leave_search(message.from_user.id, session, settings)
-    await message.answer(HELP_TEXT, reply_markup=main_menu())
+    await send_rich(message, help_screen())
 
 
 async def cmd_cancel(
@@ -56,7 +61,7 @@ async def cmd_cancel(
     text = CANCELLED_TEXT
     if cancelled_agent:
         text = "Останавливаю текущий запрос. " + text
-    await message.answer(text, reply_markup=main_menu())
+    await send_rich_text(message, text, main_menu())
 
 
 async def cmd_search(message: Message, session: AsyncSession, settings: Settings) -> None:
@@ -67,7 +72,7 @@ async def cmd_search(message: Message, session: AsyncSession, settings: Settings
 
 async def cmd_tasks(message: Message, session: AsyncSession, settings: Settings) -> None:
     await _leave_search(message.from_user.id, session, settings)
-    await message.answer("📋 <b>Задачи</b>\nВыберите список:", reply_markup=tasks_menu_keyboard())
+    await send_rich(message, tasks_menu_screen())
 
 
 async def cmd_today(message: Message, session: AsyncSession, settings: Settings) -> None:
@@ -84,15 +89,15 @@ async def cmd_weather(message: Message, session: AsyncSession, settings: Setting
         payload = render_weather_widget(snapshot)
     except (WeatherUnavailable, WidgetTooLarge, ValueError) as error:
         log.warning("weather is unavailable: %s", error)
-        await message.answer(
-            "Погода сейчас недоступна. Попробуйте позже.", reply_markup=main_menu()
+        await send_rich_text(
+            message, "Погода сейчас недоступна. Попробуйте позже.", main_menu()
         )
         return
     try:
         await send_widget(message.bot, message.chat.id, payload)
     except Exception:  # noqa: BLE001 - виджет не должен терять ответ
         log.exception("failed to send weather widget")
-        await message.answer(payload.caption, reply_markup=main_menu())
+        await send_rich_text(message, payload.caption, main_menu())
 
 
 async def cmd_documents(message: Message, session: AsyncSession, settings: Settings) -> None:

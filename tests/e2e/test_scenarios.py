@@ -79,12 +79,10 @@ async def confirm_last(harness: BotHarness, user_id: int, messages) -> list:
 
 # 1. Текстовая мысль -> подтверждение -> запись находится поиском.
 async def test_start_is_short_and_menu_is_clean(classic_settings, session_factory):
-    from jarvis.bot.texts import START_TEXT
-
     harness = await make_harness(classic_settings, session_factory)
     messages = await harness.send_text(DEFAULT_USER_ID, "/start")
     combined = " ".join(message.text or "" for message in messages)
-    assert START_TEXT in combined
+    assert "Выберите действие" in combined
     assert "Что я умею" not in combined
 
     menu = keyboard_messages(messages)[-1]
@@ -406,7 +404,7 @@ async def test_scenario_due_change_requires_confirmation(
     messages = await harness.send_text(DEFAULT_USER_ID, "/today")
     list_message = keyboard_messages(messages)[-1]
 
-    await harness.click_button(DEFAULT_USER_ID, list_message, "1. Продлить домен")
+    await harness.click_button(DEFAULT_USER_ID, list_message, "Продлить домен")
     card_message = harness.current(list_message)
 
     due_messages = await harness.click_button(DEFAULT_USER_ID, card_message, "Изменить срок")
@@ -669,8 +667,8 @@ async def test_scenario_secret_reveal_escapes_html(classic_settings, session_fac
     revealed = await harness.click_button(DEFAULT_USER_ID, card, "Показать значение")
 
     text = " ".join(message.text or "" for message in revealed)
-    assert "&lt;b&gt;bad&lt;/b&gt; &amp; &lt;/code&gt;" in text  # значение как текст
-    assert "<b>bad</b>" not in text
+    assert "<b>bad</b> & </code>" in text  # значение показано как текст, не как теги
+    assert "bad" in text
 
 
 # 9. Комментарии к задаче через карточку: добавить, увидеть, отредактировать.
@@ -685,7 +683,7 @@ async def test_scenario_task_comments_via_card(classic_settings, session_factory
     list_message = keyboard_messages(messages)[-1]
 
     # Список -> карточка -> комментарии: всё правит одно сообщение.
-    await harness.click_button(DEFAULT_USER_ID, list_message, "1. Проверить бэкап")
+    await harness.click_button(DEFAULT_USER_ID, list_message, "Проверить бэкап")
     card_message = harness.current(list_message)
     comments_menu = await harness.click_button(DEFAULT_USER_ID, card_message, "Комментарии")
     assert comments_menu == []
@@ -709,7 +707,7 @@ async def test_scenario_task_comments_via_card(classic_settings, session_factory
     # Комментарии видны в карточке задачи (свежий список -> карточка).
     messages = await harness.send_text(DEFAULT_USER_ID, "/today")
     list_message = keyboard_messages(messages)[-1]
-    await harness.click_button(DEFAULT_USER_ID, list_message, "1. Проверить бэкап")
+    await harness.click_button(DEFAULT_USER_ID, list_message, "Проверить бэкап")
     card_text = harness.current(list_message).text or ""
     assert "Позвонить в поддержку сервера" in card_text
 

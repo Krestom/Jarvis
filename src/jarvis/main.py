@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from jarvis import __version__
 from jarvis.ai import NoneProvider, create_ai_provider
 from jarvis.bot.app import create_bot, create_dispatcher, setup_bot_commands
+from jarvis.bot.rich import send_rich_chat, text_screen
 from jarvis.bot.widgets.send import send_widget
 from jarvis.bot.widgets.types import WidgetPayload
 from jarvis.config.settings import Settings, get_settings
@@ -128,7 +129,7 @@ async def amain() -> int:
         async def _notify(
             chat_id: int, text: str, reply_markup: InlineKeyboardMarkup | None = None
         ) -> None:
-            await bot.send_message(chat_id, text, parse_mode=None, reply_markup=reply_markup)
+            await send_rich_chat(bot, chat_id, text_screen(text, reply_markup))
 
         try:
             weather_provider = create_weather_provider(settings)

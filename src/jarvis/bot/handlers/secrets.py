@@ -11,14 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import SecretCB, SecretListCB
-from jarvis.bot.formatting import esc, secret_card_text
 from jarvis.bot.handlers.open_entity import parse_hex_uuid
-from jarvis.bot.handlers.render import answer_safe, propose_and_send, send_outcome
-from jarvis.bot.keyboards import (
-    PAGE_SIZE,
-    main_menu,
-    secret_card_keyboard,
-    secrets_list_keyboard,
+from jarvis.bot.handlers.render import propose_and_send, send_outcome
+from jarvis.bot.keyboards import PAGE_SIZE
+from jarvis.bot.rich import send_rich
+from jarvis.bot.screens.content import (
+    secret_card_screen,
+    secret_list_screen,
+    secret_reveal_screen,
 )
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
@@ -43,27 +43,10 @@ async def start_secret_flow(
 async def send_secrets_list(
     message: Message, session: AsyncSession, settings: Settings, *, page: int, edit: bool = False
 ) -> None:
-    from jarvis.bot.handlers.render import send_or_edit
-
     service = SecretService(session, settings)
     secrets = await service.list_metadata(limit=PAGE_SIZE, offset=page * PAGE_SIZE)
-    if not secrets and page == 0:
-        await send_or_edit(
-            message,
-            "🔐 Секретов пока нет.\n\nКоманда /secret добавляет секрет: значение "
-            "шифруется и не попадает в поиск, AI и MCP.",
-            markup=main_menu(),
-            edit=edit,
-        )
-        return
-    lines = ["🔐 <b>Секреты</b>", ""]
-    for index, secret in enumerate(secrets, start=1):
-        lines.append(f"{index}. {secret.name}")
-    lines.append("\n<i>Значения не показываются в списках и поиске.</i>")
-    markup = secrets_list_keyboard(secrets, page, has_next=len(secrets) >= PAGE_SIZE)
-    await send_or_edit(
-        message, "\n".join(lines) + "\n\nВыберите секрет:", markup=markup, edit=edit
-    )
+    screen = secret_list_screen(secrets, page, has_next=len(secrets) >= PAGE_SIZE)
+    await send_rich(message, screen, edit=edit)
 
 
 async def secrets_page(
@@ -97,9 +80,7 @@ async def secret_action(
 
     if callback_data.action == "view":
         await callback.answer()
-        await callback.message.answer(
-            secret_card_text(secret), reply_markup=secret_card_keyboard(callback_data.secret_id)
-        )
+        await send_rich(callback.message, secret_card_screen(secret))
         return
 
     if callback_data.action == "reveal":
@@ -109,13 +90,11 @@ async def secret_action(
             await callback.answer(str(error), show_alert=True)
             return
         await callback.answer("Показываю на 90 секунд")
-        message = await answer_safe(
-            callback.message,
-            f"👁 <b>{esc(secret.name)}</b>\n<code>{esc(value)}</code>\n\n"
-            "<i>Попробую удалить сообщение через 90 секунд. Если бот "
-            "перезапустится — удалите его сами.</i>",
+        message = await send_rich(
+            callback.message, secret_reveal_screen(secret, value)
         )
-        asyncio.create_task(_delete_later(message, REVEAL_LIFETIME_SECONDS))
+        if message is not None:
+            asyncio.create_task(_delete_later(message, REVEAL_LIFETIME_SECONDS))
         return
 
     if callback_data.action == "delete":

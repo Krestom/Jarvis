@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import UTC, datetime
 
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jarvis.bot.formatting import esc, split_message
+from jarvis.bot.formatting import split_message
 from jarvis.bot.keyboards import (
     agent_entity_keyboard,
     cancel_flow_keyboard,
@@ -20,6 +21,7 @@ from jarvis.bot.keyboards import (
     quick_actions_keyboard,
     search_results_keyboard,
 )
+from jarvis.bot.rich import send_rich, text_screen
 from jarvis.bot.ui_state import remember_task_list, stale_message
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import EDITABLE_PENDING_OPS, EngineOutcome
@@ -40,13 +42,19 @@ async def answer_safe(message: Message, text: str, **kwargs) -> Message:
     который Telegram отвергает как тег, — сообщение не должно теряться совсем.
     Возвращает отправленное сообщение (нужно сценарию показа секрета).
     """
+    markup = kwargs.get("reply_markup")
+    if not isinstance(markup, InlineKeyboardMarkup):
+        markup = None
     try:
-        return await message.answer(text, **kwargs)
+        sent = await send_rich(message, text_screen(text, markup))
+        if sent is not None:
+            return sent
     except TelegramBadRequest as error:
         if _PARSE_ERROR_MARKER not in str(error):
             raise
         log.warning("telegram rejected html in outgoing message, sending plain text")
         return await message.answer(_TAG_RE.sub("", text), parse_mode=None, **kwargs)
+    return await message.answer(text, **kwargs)
 
 
 async def send_or_edit(
@@ -58,6 +66,9 @@ async def send_or_edit(
     не изменился) — тихий фолбэк на новое сообщение.
     """
     chunks = split_message(text)
+    if len(chunks) == 1:
+        await send_rich(message, text_screen(chunks[0], markup), edit=edit)
+        return
     last_index = len(chunks) - 1
     if edit and not stale_message.get():
         try:
@@ -96,10 +107,13 @@ async def propose_and_send(
         user_id, operation_type, payload
     )
     preview = await render_preview(session, operation_type, payload, settings.tz)
-    await message.answer(
-        preview,
-        reply_markup=confirm_keyboard(
-            operation_id, editable=operation_type in EDITABLE_PENDING_OPS
+    await send_rich(
+        message,
+        text_screen(
+            preview,
+            confirm_keyboard(
+                operation_id, editable=operation_type in EDITABLE_PENDING_OPS
+            ),
         ),
     )
     return operation_id
@@ -128,57 +142,74 @@ async def send_outcome(
 
     # Карточка сущности (агент открыл задачу/заметку/документ) — живые кнопки.
     if outcome.card is not None:
-        from jarvis.bot.handlers.open_entity import (
-            parse_hex_uuid,
-            render_document_card,
-            render_knowledge_card,
-            render_task_card,
-        )
+        from jarvis.bot.handlers.open_entity import parse_hex_uuid
+        from jarvis.bot.screens.content import document_card_screen, knowledge_card_screen
+        from jarvis.bot.screens.core import task_card_screen
+        from jarvis.repositories.comments import TaskCommentRepository
+        from jarvis.repositories.documents import DocumentRepository
+        from jarvis.repositories.knowledge import KnowledgeRepository
+        from jarvis.repositories.tasks import TaskRepository
 
         kind, entity_id = outcome.card
         entity_uuid = parse_hex_uuid(entity_id)
-        text, card_markup = None, None
         if entity_uuid is not None:
             if kind == "task":
-                text, card_markup = await render_task_card(session, settings, entity_uuid)
+                task = await TaskRepository(session).get(entity_uuid)
+                if task is not None:
+                    comments = await TaskCommentRepository(session).list_for_task(entity_uuid)
+                    await send_rich(message, task_card_screen(task, comments, settings.tz))
+                    return
             elif kind == "knowledge":
-                text, card_markup = await render_knowledge_card(session, entity_uuid)
+                item = await KnowledgeRepository(session).get(entity_uuid)
+                if item is not None:
+                    await send_rich(message, knowledge_card_screen(item))
+                    return
             elif kind == "document":
-                text, card_markup = await render_document_card(session, entity_uuid)
-        if text is None:
-            await message.answer("Запись не найдена.", reply_markup=main_menu())
-            return
-        await send_or_edit(message, f"{text}\n\nДействия:", markup=card_markup)
+                document = await DocumentRepository(session).get(entity_uuid)
+                if document is not None:
+                    await send_rich(message, document_card_screen(document))
+                    return
+        await answer_safe(message, "Запись не найдена.", reply_markup=main_menu())
         return
 
     # Экраны-списки (задачи/документы/знания): одна страница — одно сообщение,
     # чтобы пагинация правила его на месте, а не слала новое при каждом шаге.
-    list_markup = None
-    list_prompt = None
+    list_screen = None
     if outcome.task_page is not None:
-        from jarvis.bot.keyboards import task_list_keyboard
+        from jarvis.bot.screens.core import task_list_screen
 
         view, page, value, has_next = outcome.task_page
-        list_markup = task_list_keyboard(outcome.task_choices, view, page, has_next, value)
-        list_prompt = outcome.task_choices_prompt or "Выберите задачу:"
+        now = datetime.now(UTC)
+        title = (outcome.text or "Задачи").split("\n", 1)[0]
+        day = now.astimezone(settings.tz).date() if view == "today" else None
+        list_screen = task_list_screen(
+            title=title,
+            tasks=outcome.task_choices,
+            tz=settings.tz,
+            now=now,
+            view=view,
+            page=page,
+            value=value,
+            has_next=has_next,
+            day=day,
+        )
         remember_task_list(message.chat.id, view, page, value)
     elif outcome.documents:
-        from jarvis.bot.keyboards import PAGE_SIZE, documents_list_keyboard
+        from jarvis.bot.keyboards import PAGE_SIZE
+        from jarvis.bot.screens.content import document_list_screen
 
-        list_markup = documents_list_keyboard(
+        list_screen = document_list_screen(
             outcome.documents, 0, has_next=len(outcome.documents) >= PAGE_SIZE
         )
-        list_prompt = "Выберите документ:"
     elif outcome.knowledge:
-        from jarvis.bot.keyboards import PAGE_SIZE, knowledge_list_keyboard
+        from jarvis.bot.keyboards import PAGE_SIZE
+        from jarvis.bot.screens.content import knowledge_list_screen
 
-        list_markup = knowledge_list_keyboard(
+        list_screen = knowledge_list_screen(
             outcome.knowledge, 0, has_next=len(outcome.knowledge) >= PAGE_SIZE
         )
-        list_prompt = "Выберите запись:"
-    if list_markup is not None:
-        text = f"{outcome.text}\n\n{list_prompt}" if outcome.text else list_prompt
-        await send_or_edit(message, text, markup=list_markup)
+    if list_screen is not None:
+        await send_rich(message, list_screen)
         return
 
     markup = None
@@ -212,17 +243,30 @@ async def send_outcome(
         )
 
     if outcome.task_choices:
-        await message.answer(
-            outcome.task_choices_prompt or "Выберите задачу:",
-            reply_markup=comment_target_keyboard(
-                outcome.task_choices, action=outcome.task_choices_action
+        from jarvis.bot.screens.search import task_choice_screen
+
+        await send_rich(
+            message,
+            task_choice_screen(
+                outcome.task_choices,
+                action=outcome.task_choices_action,
+                prompt=outcome.task_choices_prompt or "Выберите задачу:",
+                markup=comment_target_keyboard(
+                    outcome.task_choices, action=outcome.task_choices_action
+                ),
             ),
         )
 
     if outcome.entity_choices:
-        await message.answer(
-            outcome.entity_choice_prompt or "Уточните, что имелось в виду:",
-            reply_markup=agent_entity_keyboard(outcome.entity_choices),
+        from jarvis.bot.screens.search import entity_choice_screen
+
+        await send_rich(
+            message,
+            entity_choice_screen(
+                outcome.entity_choices,
+                prompt=outcome.entity_choice_prompt or "Уточните, что имелось в виду:",
+                markup=agent_entity_keyboard(outcome.entity_choices),
+            ),
         )
 
 
@@ -233,33 +277,26 @@ async def send_search_results(
     edit: bool = False,
     back: tuple[str, str] | None = None,
 ) -> None:
+    from jarvis.bot.screens.search import search_empty_screen, search_results_screen
+
     hits = outcome.search_hits
     query = outcome.search_query or ""
     if not hits:
-        if outcome.search_page > 0:
-            await send_or_edit(
-                message, "Больше результатов нет.", markup=main_menu(), edit=edit
-            )
-            return
-        await send_or_edit(
+        text = EMPTY_SEARCH_TEXT if outcome.search_page == 0 else "Больше результатов нет."
+        await send_rich(
             message,
-            f"{EMPTY_SEARCH_TEXT}\n\n<i>Запрос: {esc(query)}</i>",
-            markup=main_menu(),
+            search_empty_screen(
+                query, page=outcome.search_page, text=text, markup=main_menu()
+            ),
             edit=edit,
         )
         return
 
-    header = f"🔎 <b>Результаты по запросу</b> «{esc(query)}» — стр. {outcome.search_page + 1}\n"
     from jarvis.bot.keyboards import PAGE_SIZE
 
-    lines = [header]
-    for index, hit in enumerate(hits, start=1):
-        kind_emoji = {"knowledge": "📚", "task": "✅", "document": "📄"}.get(hit.kind, "•")
-        snippet = f" — <i>{esc(hit.snippet)}</i>" if hit.snippet else ""
-        lines.append(f"{index}. {kind_emoji} {esc(hit.title)}{snippet}")
-    text = "\n".join(lines) + "\n\nВыберите запись, чтобы открыть:"
+    has_next = len(hits) >= PAGE_SIZE
     markup = search_results_keyboard(
-        hits, query, outcome.search_page, has_next=len(hits) >= PAGE_SIZE
+        hits, query, outcome.search_page, has_next=has_next
     )
     if back is not None:
         from aiogram.types import InlineKeyboardButton
@@ -267,4 +304,15 @@ async def send_search_results(
         markup.inline_keyboard.append(
             [InlineKeyboardButton(text=back[0], callback_data=back[1])]
         )
-    await send_or_edit(message, text, markup=markup, edit=edit)
+    await send_rich(
+        message,
+        search_results_screen(
+            hits,
+            query,
+            outcome.search_page,
+            has_next=has_next,
+            markup=markup,
+            back=back,
+        ),
+        edit=edit,
+    )

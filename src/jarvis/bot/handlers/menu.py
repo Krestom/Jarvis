@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import MenuCB
-from jarvis.bot.ui_state import stale_message
+from jarvis.bot.rich import send_rich, text_screen
+from jarvis.bot.screens.core import main_menu_screen, tasks_menu_screen
 from jarvis.config.settings import Settings
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
@@ -23,14 +24,7 @@ async def _edit_or_send(callback: CallbackQuery, text: str, markup, *, with_menu
     from jarvis.bot.keyboards import main_menu
 
     reply_markup = main_menu() if with_menu else markup
-    message = callback.message
-    if stale_message.get():
-        await message.answer(text, reply_markup=reply_markup)
-        return
-    try:
-        await message.edit_text(text, reply_markup=reply_markup)
-    except Exception:  # noqa: BLE001 - старое сообщение могло быть недоступно для правки
-        await message.answer(text, reply_markup=reply_markup)
+    await send_rich(callback.message, text_screen(text, reply_markup), edit=True)
 
 
 async def _leave_search(
@@ -45,7 +39,8 @@ async def menu_main(
     callback: CallbackQuery, session: AsyncSession, settings: Settings
 ) -> None:
     await _leave_search(callback, session, settings)
-    await _edit_or_send(callback, "Главное меню:", markup=None, with_menu=True)
+    await callback.answer()
+    await send_rich(callback.message, main_menu_screen(), edit=True)
 
 
 async def menu_search(callback: CallbackQuery, session: AsyncSession, settings: Settings) -> None:
@@ -58,17 +53,9 @@ async def menu_search(callback: CallbackQuery, session: AsyncSession, settings: 
 async def menu_tasks(
     callback: CallbackQuery, session: AsyncSession, settings: Settings
 ) -> None:
-    from jarvis.bot.handlers.render import send_or_edit
-    from jarvis.bot.keyboards import tasks_menu_keyboard
-
     await _leave_search(callback, session, settings)
     await callback.answer()
-    await send_or_edit(
-        callback.message,
-        "📋 <b>Задачи</b>\nВыберите список:",
-        markup=tasks_menu_keyboard(),
-        edit=True,
-    )
+    await send_rich(callback.message, tasks_menu_screen(), edit=True)
 
 
 async def menu_knowledge(

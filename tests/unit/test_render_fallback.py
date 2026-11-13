@@ -13,6 +13,15 @@ class _FakeMessage:
         self.calls: list[dict] = []
         self._fail_first = fail_first
 
+    async def answer_rich(self, rich):
+        raise TelegramBadRequest(
+            method=None,
+            message=(
+                "Bad Request: can't parse entities: "
+                'Unsupported start tag "=" at byte offset 1'
+            ),
+        )
+
     async def answer(self, text: str, **kwargs):
         self.calls.append({"text": text, **kwargs})
         if self._fail_first and len(self.calls) == 1:

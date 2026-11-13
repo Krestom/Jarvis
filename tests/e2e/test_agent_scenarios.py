@@ -544,7 +544,7 @@ async def test_agent_opens_documents_screen(test_settings, session_factory, sess
     card = await harness.click_button(DEFAULT_USER_ID, list_message, "1. passport")
     assert card == []  # карточка правит сообщение, новых не шлёт
     card_text = harness.current(list_message).text or ""
-    assert "Документ:" in card_text
+    assert "Документ" in card_text
     assert "passport" in card_text
 
 
@@ -663,7 +663,7 @@ async def test_agent_opens_document_card_with_live_buttons(
     )
     messages = await harness.send_text(DEFAULT_USER_ID, "открой карточку документа")
     combined = " ".join(m.text or "" for m in messages)
-    assert "Документ:" in combined
+    assert "Документ" in combined
     card_message = keyboard_messages(messages)[-1]
     labels = [
         button.text for row in card_message.reply_markup.inline_keyboard for button in row
@@ -698,7 +698,7 @@ async def test_agent_opens_task_card_screen(test_settings, session_factory, sess
 
     messages = await harness.send_text(DEFAULT_USER_ID, "открой карточку задачи")
     combined = " ".join(m.text or "" for m in messages)
-    assert "Задача:" in combined
+    assert "Задача" in combined
     assert "Починить сервер" in combined
     card_message = keyboard_messages(messages)[-1]
     labels = [

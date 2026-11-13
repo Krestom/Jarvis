@@ -11,14 +11,11 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.bot.callbacks import DocCB, DocListCB
-from jarvis.bot.formatting import esc
-from jarvis.bot.handlers.open_entity import parse_hex_uuid, render_document_card
-from jarvis.bot.handlers.render import propose_and_send, send_or_edit
-from jarvis.bot.keyboards import (
-    PAGE_SIZE,
-    documents_list_keyboard,
-    main_menu,
-)
+from jarvis.bot.handlers.open_entity import parse_hex_uuid
+from jarvis.bot.handlers.render import propose_and_send
+from jarvis.bot.keyboards import PAGE_SIZE, main_menu
+from jarvis.bot.rich import send_rich, send_rich_text
+from jarvis.bot.screens.content import document_card_screen, document_list_screen
 from jarvis.config.settings import Settings
 from jarvis.conversation.state import ConversationStore
 from jarvis.documents.storage import EncryptedFileStorage
@@ -46,25 +43,10 @@ async def send_documents_list(
         limit=PAGE_SIZE,
         offset=page * PAGE_SIZE,
     )
-    title = "📄 <b>Документы</b>"
-    if not documents and page == 0:
-        await send_or_edit(
-            message,
-            "📄 Пока нет документов.\n\nОтправьте файл одним сообщением — "
-            "я зашифрую его и предложу сохранить.",
-            markup=main_menu(),
-            edit=edit,
-        )
-        return
-    lines = [title, ""]
-    for index, document in enumerate(documents, start=1):
-        lines.append(f"{index}. {esc(document.title)}")
-    markup = documents_list_keyboard(
+    screen = document_list_screen(
         documents, page, has_next=len(documents) >= PAGE_SIZE
     )
-    await send_or_edit(
-        message, "\n".join(lines) + "\n\nВыберите документ:", markup=markup, edit=edit
-    )
+    await send_rich(message, screen, edit=edit)
 
 
 async def documents_page(
@@ -91,13 +73,13 @@ async def document_action(
         return
 
     if callback_data.action == "view":
-        text, markup = await render_document_card(session, document_id)
+        document = await DocumentRepository(session).get(document_id)
         await callback.answer()
-        if text is None:
-            await callback.message.answer("Документ не найден.", reply_markup=main_menu())
+        if document is None:
+            await send_rich_text(callback.message, "Документ не найден.", main_menu())
             return
         # Карточка правит сообщение, из которого открыта (список/поиск).
-        await send_or_edit(callback.message, f"{text}\n\nДействия:", markup=markup, edit=True)
+        await send_rich(callback.message, document_card_screen(document), edit=True)
         return
 
     if callback_data.action == "download":

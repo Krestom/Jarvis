@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
-from jarvis.bot.callbacks import ImpCB, ImpListCB, uuid_hex
+from jarvis.bot.callbacks import ImpCB, ImpListCB
 from jarvis.bot.formatting import esc
 from jarvis.bot.handlers.menu import MenuCBFilter
 from jarvis.bot.handlers.open_entity import parse_hex_uuid
@@ -21,15 +21,16 @@ from jarvis.bot.keyboards import (
     IMPROVEMENT_CATEGORY_LABELS,
     IMPROVEMENT_STATUS_LABELS,
     PAGE_SIZE,
-    backlog_card_keyboard,
-    backlog_delete_keyboard,
-    backlog_list_keyboard,
-    diagnostics_keyboard,
 )
-from jarvis.bot.ui_state import stale_message
+from jarvis.bot.rich import RichScreen, send_rich, send_rich_text
+from jarvis.bot.screens.diagnostics import (
+    backlog_card_screen,
+    backlog_delete_screen,
+    backlog_list_screen,
+    dashboard_screen,
+)
 from jarvis.config.settings import Settings
-from jarvis.conversation.preview import fmt_dt_local
-from jarvis.db.models import Document, ImprovementItem, KnowledgeItem, Secret, Task
+from jarvis.db.models import Document, KnowledgeItem, Secret, Task
 from jarvis.domain.enums import ImprovementCategory, ImprovementStatus
 from jarvis.repositories.improvements import OPEN_STATUSES, ImprovementRepository
 from jarvis.services.improvement_export import export_backlog
@@ -48,7 +49,7 @@ async def _system_summary(
     session: AsyncSession, settings: Settings, ai: AIProvider, user_id: int
 ) -> tuple[list[str], dict, dict]:
     """Строки системной сводки + счётчики backlog (пустые при недоступной БД)."""
-    lines = ["<b>Диагностика</b>"]
+    lines: list[str] = []
     status_counts: dict = {}
     category_counts: dict = {}
     try:
@@ -98,24 +99,30 @@ async def cmd_diagnostics(
     lines, status_counts, category_counts = await _system_summary(
         session, settings, ai, message.from_user.id
     )
-    await message.answer(
-        "\n".join(lines), reply_markup=diagnostics_keyboard(status_counts, category_counts)
+    await send_rich(
+        message,
+        dashboard_screen(
+            summary=lines,
+            status_counts=status_counts,
+            category_counts=category_counts,
+        ),
     )
 
 
 async def menu_diagnostics(
     callback: CallbackQuery, session: AsyncSession, settings: Settings, ai: AIProvider
 ) -> None:
-    from jarvis.bot.handlers.render import send_or_edit
-
     lines, status_counts, category_counts = await _system_summary(
         session, settings, ai, callback.from_user.id
     )
     await callback.answer()
-    await send_or_edit(
+    await send_rich(
         callback.message,
-        "\n".join(lines),
-        markup=diagnostics_keyboard(status_counts, category_counts),
+        dashboard_screen(
+            summary=lines,
+            status_counts=status_counts,
+            category_counts=category_counts,
+        ),
         edit=True,
     )
 
@@ -169,70 +176,24 @@ def _list_title(kind: str, value: str) -> str:
     return "📥 Открытые записи backlog"
 
 
-def render_backlog_card(item: ImprovementItem, tz) -> str:
-    category = IMPROVEMENT_CATEGORY_LABELS.get(item.category.value, item.category.value)
-    status = IMPROVEMENT_STATUS_LABELS.get(item.status.value, item.status.value)
-    lines = [
-        f"{category}: <b>{esc(item.title)}</b>",
-        f"Статус: {status} · Источник: {item.source.value}",
-        f"Повторов: {item.occurrence_count} · "
-        f"Впервые: {fmt_dt_local(item.first_seen_at, tz)} · "
-        f"Последний раз: {fmt_dt_local(item.last_seen_at, tz)}",
-    ]
-    if item.confidence is not None:
-        lines.append(f"Достоверность гипотезы: {item.confidence:.2f}")
-    if item.component:
-        lines.append(f"Компонент: <code>{esc(item.component)}</code>")
-    lines.append("")
-    lines.append(esc(item.summary))
-    for label, value in (
-        ("Ожидалось", item.expected_behavior),
-        ("Фактически", item.actual_behavior),
-        ("Факты", item.facts),
-        ("Допущения", item.assumptions),
-        ("Предлагаемое исправление", item.proposed_fix),
-    ):
-        if value:
-            lines.append(f"<b>{label}:</b> {esc(value)}")
-    if item.diagnostic_context.get("correlation_id"):
-        lines.append(
-            f"Correlation: <code>{esc(str(item.diagnostic_context['correlation_id']))}</code>"
-        )
-    return "\n".join(lines)
-
-
 async def build_backlog_page(
     session: AsyncSession, settings: Settings, kind: str, value: str, page: int
-) -> tuple[str, object]:
+) -> RichScreen:
     repo = ImprovementRepository(session)
     filters = _filter_from(kind, value)
     items = await repo.list_items(
         limit=PAGE_SIZE, offset=page * PAGE_SIZE, **filters
     )
     total = await repo.count_items(**filters)
-    lines = [_list_title(kind, value), ""]
-    if not items:
-        lines.append("Пусто.")
-    for index, item in enumerate(items, start=1):
-        status = IMPROVEMENT_STATUS_LABELS.get(item.status.value, item.status.value)
-        lines.append(
-            f"{index}. {esc(item.title[:60])} — {status}, "
-            f"повторов: {item.occurrence_count}"
-        )
-    text = "\n".join(lines)
-    has_next = page * PAGE_SIZE + len(items) < total
-    markup = backlog_list_keyboard(items, kind, value, page, has_next)
-    return text, markup
-
-
-async def _edit_or_answer(callback: CallbackQuery, text: str, markup) -> None:
-    if stale_message.get():
-        await callback.message.answer(text, reply_markup=markup)
-        return
-    try:
-        await callback.message.edit_text(text, reply_markup=markup)
-    except Exception:  # noqa: BLE001 - сообщение могло быть недоступно для правки
-        await callback.message.answer(text, reply_markup=markup)
+    return backlog_list_screen(
+        title=_list_title(kind, value),
+        items=items,
+        total=total,
+        kind=kind,
+        value=value,
+        page=page,
+        has_next=page * PAGE_SIZE + len(items) < total,
+    )
 
 
 async def backlog_list_action(
@@ -240,13 +201,13 @@ async def backlog_list_action(
 ) -> None:
     await callback.answer()
     try:
-        text, markup = await build_backlog_page(
+        screen = await build_backlog_page(
             session, settings, callback_data.kind, callback_data.value, max(0, callback_data.page)
         )
     except ValueError:
         await callback.answer("Фильтр устарел — откройте /diagnostics заново", show_alert=True)
         return
-    await _edit_or_answer(callback, text, markup)
+    await send_rich(callback.message, screen, edit=True)
 
 
 # --- Карточка и действия ------------------------------------------------------
@@ -260,12 +221,16 @@ async def _render_card(
     origin: str,
     page: int,
 ) -> None:
-    item = await ImprovementRepository(session).get(parse_hex_uuid(item_id))
+    repo = ImprovementRepository(session)
+    item = await repo.get(parse_hex_uuid(item_id))
     if item is None:
         await callback.answer("Запись не найдена", show_alert=True)
         return
-    markup = backlog_card_keyboard(item, origin, page)
-    await _edit_or_answer(callback, render_backlog_card(item, settings.tz), markup)
+    events = await repo.list_events(item.id)
+    screen = backlog_card_screen(
+        item, settings.tz, events, origin=origin, page=page
+    )
+    await send_rich(callback.message, screen, edit=True)
 
 
 async def imp_action(
@@ -292,8 +257,15 @@ async def imp_action(
             await callback.answer("Запись не найдена", show_alert=True)
             return
         await callback.answer()
-        markup = backlog_card_keyboard(item, callback_data.value, callback_data.page)
-        await _edit_or_answer(callback, render_backlog_card(item, settings.tz), markup)
+        events = await repo.list_events(item.id)
+        screen = backlog_card_screen(
+            item,
+            settings.tz,
+            events,
+            origin=callback_data.value,
+            page=callback_data.page,
+        )
+        await send_rich(callback.message, screen, edit=True)
         return
 
     if action == "status":
@@ -311,11 +283,10 @@ async def imp_action(
             await callback.answer("Запись не найдена", show_alert=True)
             return
         await callback.answer()
-        await callback.message.answer(
-            f"Удалить запись «{esc(item.title)}» <b>безвозвратно</b>? "
-            "История повторов тоже будет удалена.",
-            reply_markup=backlog_delete_keyboard(
-                uuid_hex(item.id), callback_data.value, callback_data.page
+        await send_rich(
+            callback.message,
+            backlog_delete_screen(
+                item, origin=callback_data.value, page=callback_data.page
             ),
         )
         return
@@ -326,7 +297,7 @@ async def imp_action(
             return
         await repo.hard_delete(item)
         await callback.answer("Удалено")
-        await _edit_or_answer(callback, "🗑 Запись удалена.", None)
+        await send_rich_text(callback.message, "🗑 Запись удалена.", edit=True)
         return
 
     if action == "delete_no":

@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import html as html_lib
 import itertools
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -18,6 +20,8 @@ from aiogram.types import (
     Chat,
     Document,
     File,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     Message,
     Update,
     User,
@@ -32,6 +36,55 @@ DEFAULT_USER_ID = 111
 # Общий счётчик на процесс: update_id должны быть уникальны между harness'ами,
 # иначе дедупликация апдейтов отбросит повторно доставленный update.
 _UPDATE_IDS = itertools.count(10_000)
+
+_ATTR_RE = re.compile(r'([a-zA-Z-]+)="([^"]*)"')
+_BUTTON_RE = re.compile(r"<tg-button\b([^>]*)>(.*?)</tg-button>", re.S)
+_ROW_RE = re.compile(r"<tg-button-row\b[^>]*>(.*?)</tg-button-row>", re.S)
+
+
+def _rich_text(html: str) -> str:
+    """Видимый текст rich-карточки для проверок в тестах."""
+    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.I)
+    text = re.sub(r"</(?:p|h[1-6]|tg-button-row)>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html_lib.unescape(text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\n\s*\n+", "\n", text).strip()
+
+
+def _rich_button(match: re.Match) -> InlineKeyboardButton | None:
+    attrs = dict(_ATTR_RE.findall(match.group(1)))
+    label = re.sub(r"<[^>]+>", "", match.group(2))
+    label = html_lib.unescape(label).strip()
+    if not label:
+        return None
+    kind = attrs.get("type")
+    if kind == "callback_data":
+        return InlineKeyboardButton(
+            text=label, callback_data=attrs.get("data"), style=attrs.get("style")
+        )
+    if kind == "url":
+        return InlineKeyboardButton(text=label, url=attrs.get("url"), style=attrs.get("style"))
+    return None
+
+
+def _rich_markup(html: str) -> InlineKeyboardMarkup | None:
+    """Синтетическая клавиатура из <tg-button>, чтобы клики в тестах работали."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for row_match in _ROW_RE.finditer(html):
+        row = [b for m in _BUTTON_RE.finditer(row_match.group(1)) if (b := _rich_button(m))]
+        if row:
+            rows.append(row)
+    outside = _ROW_RE.sub("", html)
+    for match in _BUTTON_RE.finditer(outside):
+        button = _rich_button(match)
+        if button is not None:
+            rows.append([button])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
+
+def _rich_message(html: str) -> dict:
+    return {"text": _rich_text(html), "reply_markup": _rich_markup(html)}
 
 
 class FakeTelegramSession(BaseSession):
@@ -64,6 +117,19 @@ class FakeTelegramSession(BaseSession):
                 from_user=BOT_USER,
                 text=method.text,
                 reply_markup=method.reply_markup,
+            )
+            self.sent_messages.append(message)
+            self.tracker.note(int(method.chat_id), message.message_id)
+            return message
+        if name == "SendRichMessage":
+            self._message_id += 1
+            rich = method.rich_message
+            message = Message(
+                message_id=self._message_id,
+                date=datetime.now(UTC),
+                chat=Chat(id=int(method.chat_id), type="private"),
+                from_user=BOT_USER,
+                **_rich_message(rich.html or rich.markdown or ""),
             )
             self.sent_messages.append(message)
             self.tracker.note(int(method.chat_id), message.message_id)
@@ -104,10 +170,19 @@ class FakeTelegramSession(BaseSession):
                 if existing.message_id != method.message_id:
                     continue
                 updates: dict = {}
-                if name == "EditMessageText" and method.text is not None:
+                rich_html = None
+                if name == "EditMessageText" and method.rich_message is not None:
+                    rich = method.rich_message
+                    rich_html = rich.html or rich.markdown or ""
+                    updates.update(_rich_message(rich_html))
+                elif name == "EditMessageText" and method.text is not None:
                     updates["text"] = method.text
                 if method.reply_markup is not None:
                     updates["reply_markup"] = method.reply_markup
+                if rich_html is not None:
+                    # В rich-правке пустая клавиатура очищает старую, а кнопки
+                    # живут в HTML — для тестов синтезируем их из карточки.
+                    updates["reply_markup"] = _rich_markup(rich_html)
                 edited = existing.model_copy(update=updates)
                 self.sent_messages[index] = edited
                 return edited

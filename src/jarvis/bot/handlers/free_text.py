@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jarvis.agent.queue import UserSessionGate
 from jarvis.ai import AIProvider
 from jarvis.bot.handlers.render import send_outcome
-from jarvis.bot.keyboards import main_menu
-from jarvis.bot.texts import HELP_TEXT
+from jarvis.bot.rich import send_rich
+from jarvis.bot.screens.core import help_screen
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 
@@ -25,8 +25,9 @@ async def free_text(
 ) -> None:
     text = message.text or ""
     if text.startswith("/"):
-        await message.answer(
-            "Неизвестная команда. Вот что я умею:\n\n" + HELP_TEXT, reply_markup=main_menu()
+        await send_rich(
+            message,
+            help_screen(intro="Неизвестная команда. Вот что я умею:"),
         )
         return
     engine = ConversationEngine(

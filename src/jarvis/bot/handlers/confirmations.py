@@ -5,20 +5,17 @@ from __future__ import annotations
 import uuid
 
 from aiogram import Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jarvis.ai import AIProvider
 from jarvis.bot.callbacks import ConfirmCB, MenuCB
+from jarvis.bot.rich import RichScreen, send_rich, send_rich_text
 from jarvis.bot.texts import CALLBACK_STALE, CONFIRM_ALREADY, CONFIRM_APPLIED, CONFIRM_FAILED
-from jarvis.bot.ui_state import stale_message
 from jarvis.config.settings import Settings
 from jarvis.conversation.engine import ConversationEngine
 from jarvis.domain.enums import PendingOpType
 from jarvis.services.confirmation import ConfirmationService, ConfirmResult
-
-MESSAGE_LIMIT = 3900
 
 # Для удалений и «невизуальных» операций: кнопка возврата к нужному списку.
 _NAV_AFTER: dict[PendingOpType, tuple[str, str]] = {
@@ -33,9 +30,7 @@ _NAV_AFTER: dict[PendingOpType, tuple[str, str]] = {
 async def _update_message(
     callback: CallbackQuery, suffix: str, *, nav: tuple[str, str] | None = None
 ) -> None:
-    """Дописать итог в сообщение операции (кнопки снимаются/заменяются)."""
-    message = callback.message
-    updated = ((message.text or "") + suffix).strip()
+    """Показать итог операции отдельной карточкой, сняв кнопки решения."""
     markup = (
         InlineKeyboardMarkup(
             inline_keyboard=[
@@ -49,29 +44,19 @@ async def _update_message(
         if nav is not None
         else None
     )
-    if len(updated) > MESSAGE_LIMIT or stale_message.get():
-        await message.answer(suffix.strip(), reply_markup=markup)
-        return
-    try:
-        await message.edit_text(updated, reply_markup=markup)
-    except TelegramBadRequest as error:
-        if "not modified" in str(error):
-            return
-        await message.answer(suffix.strip(), reply_markup=markup)
-    except Exception:  # noqa: BLE001 - сообщение могло устареть
-        await message.answer(suffix.strip(), reply_markup=markup)
+    await send_rich_text(callback.message, suffix.strip() or "Готово.", markup, edit=True)
 
 
 async def _result_view(
     result: ConfirmResult, session: AsyncSession, settings: Settings
-) -> tuple[str, InlineKeyboardMarkup] | None:
-    """Свежий вид сущности после применённой операции (иначе — обычный текст)."""
-    from jarvis.bot.handlers.open_entity import (
-        render_comments_view,
-        render_document_card,
-        render_knowledge_card,
-        render_task_card,
-    )
+) -> RichScreen | None:
+    """Свежий rich-вид сущности после применённой операции."""
+    from jarvis.bot.screens.content import document_card_screen, knowledge_card_screen
+    from jarvis.bot.screens.core import comments_screen, task_card_screen
+    from jarvis.repositories.comments import TaskCommentRepository
+    from jarvis.repositories.documents import DocumentRepository
+    from jarvis.repositories.knowledge import KnowledgeRepository
+    from jarvis.repositories.tasks import TaskRepository
 
     if result.entity_id is None:
         return None
@@ -80,19 +65,32 @@ async def _result_view(
     except ValueError:
         return None
     op = result.operation_type
+    screen: RichScreen | None = None
     if op in (PendingOpType.CREATE_TASK, PendingOpType.UPDATE_TASK):
-        text, markup = await render_task_card(session, settings, entity_id)
+        task = await TaskRepository(session).get(entity_id)
+        if task is not None:
+            comments = await TaskCommentRepository(session).list_for_task(task.id)
+            screen = task_card_screen(task, comments, settings.tz)
     elif op in (PendingOpType.CREATE_COMMENT, PendingOpType.UPDATE_COMMENT):
-        text, markup = await render_comments_view(session, settings, entity_id)
+        task = await TaskRepository(session).get(entity_id)
+        if task is not None:
+            comments = await TaskCommentRepository(session).list_for_task(task.id)
+            screen = comments_screen(task, comments, settings.tz)
     elif op in (PendingOpType.CREATE_KNOWLEDGE, PendingOpType.UPDATE_KNOWLEDGE):
-        text, markup = await render_knowledge_card(session, entity_id)
+        item = await KnowledgeRepository(session).get(entity_id)
+        if item is not None:
+            screen = knowledge_card_screen(item)
     elif op in (PendingOpType.SAVE_DOCUMENT, PendingOpType.UPDATE_DOCUMENT):
-        text, markup = await render_document_card(session, entity_id)
-    else:
+        document = await DocumentRepository(session).get(entity_id)
+        if document is not None:
+            screen = document_card_screen(document)
+    if screen is None:
         return None
-    if text is None:
-        return None
-    return f"{text}\n\nДействия:", markup
+    return RichScreen(
+        html="<p><b>✅ Готово</b></p>" + screen.html,
+        text="✅ Готово\n\n" + screen.text,
+        markup=screen.markup,
+    )
 
 
 async def confirm_action(
@@ -117,10 +115,7 @@ async def confirm_action(
             # Превью превращается в свежую карточку (задача/комментарии/заметка/документ).
             view = await _result_view(result, session, settings)
             if view is not None:
-                from jarvis.bot.handlers.render import send_or_edit
-
-                text, markup = view
-                await send_or_edit(callback.message, text, markup=markup, edit=True)
+                await send_rich(callback.message, view, edit=True)
                 return
             nav = _NAV_AFTER.get(result.operation_type)
             await _update_message(
