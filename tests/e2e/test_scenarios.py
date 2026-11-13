@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -846,6 +846,47 @@ async def test_scenario_list_tasks(classic_settings, session_factory, session):
     combined = " ".join(m.text or "" for m in messages)
     assert "Обновить дашборд" in combined
     assert "ничего не нашёл" not in combined.lower()
+
+
+async def test_scenario_task_period_next_week_and_explicit_range(
+    classic_settings, session_factory, session
+):
+    tz = classic_settings.tz
+    today = datetime.now(UTC).astimezone(tz).date()
+    next_monday = today + timedelta(days=7 - today.weekday())
+    current_due = datetime.combine(today, time(12), tzinfo=tz)
+    next_due = datetime.combine(next_monday, time(12), tzinfo=tz)
+    far_start = today + timedelta(days=30)
+    far_due = datetime.combine(far_start, time(12), tzinfo=tz)
+    service = TaskService(session)
+    await service.create_from_draft(TaskDraft(title="Текущая неделя", due_at=current_due))
+    await service.create_from_draft(TaskDraft(title="Следующая неделя", due_at=next_due))
+    await service.create_from_draft(TaskDraft(title="Дальний период", due_at=far_due))
+    await session.commit()
+
+    harness = await make_harness(classic_settings, session_factory)
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, "Выведи все задачи на следующую неделю"
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Следующая неделя" in combined
+    assert "Текущая неделя" not in combined
+    assert "Дальний период" not in combined
+
+    messages = await harness.send_text(
+        DEFAULT_USER_ID,
+        f"Покажи задачи с {far_start:%d.%m} по {(far_start + timedelta(days=1)):%d.%m}",
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Дальний период" in combined
+    assert "Следующая неделя" not in combined
+
+    menu_messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    menu = keyboard_messages(menu_messages)[-1]
+    await harness.click_button(DEFAULT_USER_ID, menu, "Следующая неделя")
+    combined = harness.current(menu).text or ""
+    assert "Следующая неделя" in combined
+    assert "Текущая неделя" not in combined
 
 
 # 13. «Какие комментарии к задаче X» — показываем комментарии.

@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -103,6 +103,14 @@ class ListTasksArgs(BaseModel):
         description="День (YYYY-MM-DD): задачи с дедлайном на эту дату; "
         "используй вместо view для вопросов «задачи на 19 октября»",
     )
+    start_date: date | None = Field(
+        default=None,
+        description="Начало периода (YYYY-MM-DD) для «задачи за период»",
+    )
+    end_date: date | None = Field(
+        default=None,
+        description="Конец периода включительно (YYYY-MM-DD)",
+    )
 
     @field_validator("view")
     @classmethod
@@ -110,6 +118,18 @@ class ListTasksArgs(BaseModel):
         if value not in TASK_VIEWS:
             raise ValueError(f"view должен быть одним из: {', '.join(TASK_VIEWS)}")
         return value
+
+    @model_validator(mode="after")
+    def _check_period(self) -> ListTasksArgs:
+        if (self.start_date is None) != (self.end_date is None):
+            raise ValueError("start_date и end_date указываются вместе")
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.end_date < self.start_date
+        ):
+            raise ValueError("end_date не может быть раньше start_date")
+        return self
 
 
 class SearchTasksArgs(BaseModel):
@@ -280,7 +300,8 @@ _TOOLS: dict[str, ToolMeta] = {
         ListTasksArgs,
         "Список задач по динамическому представлению (today — включая просроченные, "
         "week, no_group — без срока, all — все незавершённые). Вместо view можно "
-        "указать on_date (задачи на конкретный день). Данные из базы.",
+        "указать on_date (задачи на конкретный день) или пару start_date/end_date "
+        "(задачи за период включительно). Данные из базы.",
         mutating=False,
         risk="low",
     ),
@@ -534,6 +555,25 @@ class ToolRegistry:
 
     async def _list_tasks(self, args: ListTasksArgs) -> ToolResult:
         service = TaskService(self._session)
+        if args.start_date is not None and args.end_date is not None:
+            tasks = await service.list_period(
+                args.start_date,
+                args.end_date,
+                tz=self._settings.tz,
+                limit=args.limit,
+                offset=args.offset,
+            )
+            await self._surface_tasks(tasks)
+            return ToolResult(
+                ok=True,
+                data={
+                    "start_date": args.start_date.isoformat(),
+                    "end_date": args.end_date.isoformat(),
+                    "items": await self._task_briefs(tasks),
+                    "offset": args.offset,
+                    "limit": args.limit,
+                },
+            )
         if args.on_date is not None:
             tasks = await service.list_on_date(
                 args.on_date, tz=self._settings.tz, limit=args.limit, offset=args.offset

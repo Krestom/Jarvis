@@ -399,6 +399,31 @@ async def test_list_tasks_all_view_returns_every_active(session, test_settings):
     assert titles == {"На неделе", "Без срока"}
 
 
+async def test_list_tasks_period_returns_only_tasks_in_range(session, test_settings):
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="В периоде", due_at=now + timedelta(days=3))
+    )
+    await TaskService(session).create_from_draft(
+        TaskDraft(title="Вне периода", due_at=now + timedelta(days=30))
+    )
+    registry = make_registry(session, test_settings)
+    start = (now + timedelta(days=1)).date()
+    end = (now + timedelta(days=7)).date()
+
+    result = await registry.call(
+        "list_tasks",
+        {"start_date": start.isoformat(), "end_date": end.isoformat()},
+    )
+    assert result.ok is True
+    titles = {item["title"] for item in result.data["items"]}
+    assert titles == {"В периоде"}
+    assert result.data["start_date"] == start.isoformat()
+    assert result.data["end_date"] == end.isoformat()
+
+
 async def test_send_document_tool_reads_encrypted_file(session, test_settings):
     from jarvis.documents.storage import EncryptedFileStorage
     from jarvis.services.documents import DocumentService

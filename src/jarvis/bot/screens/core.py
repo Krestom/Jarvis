@@ -55,10 +55,13 @@ def tasks_menu_screen() -> RichScreen:
             button("📆 На этой неделе", TaskListCB(view="week").pack()),
         )
         + row(
+            button("🗓 Следующая неделя", TaskListCB(view="next_week").pack()),
             button("📋 Все задачи", TaskListCB(view="all").pack()),
-            button("📥 Без срока", TaskListCB(view="no_group").pack()),
         )
-        + row(button("🏠 В меню", MenuCB(action="main").pack(), style="link"))
+        + row(
+            button("📥 Без срока", TaskListCB(view="no_group").pack()),
+            button("🏠 В меню", MenuCB(action="main").pack(), style="link"),
+        )
     )
     return RichScreen(
         html=html,

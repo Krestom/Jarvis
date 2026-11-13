@@ -136,6 +136,7 @@ def tasks_menu_keyboard() -> InlineKeyboardMarkup:
     labels = [
         ("today", "🔸 Сегодня"),
         ("week", "📆 На этой неделе"),
+        ("next_week", "🗓 Следующая неделя"),
         ("all", "📋 Все задачи"),
         ("no_group", "📥 Без срока"),
     ]
@@ -144,7 +145,7 @@ def tasks_menu_keyboard() -> InlineKeyboardMarkup:
     builder.add(
         InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
     )
-    builder.adjust(2, 2, 1)
+    builder.adjust(2, 2, 2)
     return builder.as_markup()
 
 

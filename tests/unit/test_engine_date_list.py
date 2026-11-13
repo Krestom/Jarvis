@@ -21,3 +21,16 @@ def test_date_list_not_stolen_from_task_creation(settings):
     assert engine._date_list_day("поставь задачу на 22.10.2026") is None
     assert engine._date_list_day("добавь задачу на завтра: позвонить") is None
     assert engine._date_list_day("найди заметку про отпуск") is None
+
+
+def test_range_list_detected_for_requests(settings):
+    engine = make_engine(settings)
+    assert engine._date_list_range("выведи все задачи на следующую неделю") is not None
+    assert engine._date_list_range("покажи задачи с 20 по 27 ноября") is not None
+    assert engine._date_list_range("что у меня на следующей неделе") is not None
+
+
+def test_range_list_not_stolen_from_task_creation(settings):
+    engine = make_engine(settings)
+    assert engine._date_list_range("поставь задачу на следующую неделю: проверить бэкап") is None
+    assert engine._date_list_range("покажи погоду на следующую неделю") is None

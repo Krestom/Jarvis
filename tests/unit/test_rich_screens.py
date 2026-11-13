@@ -70,7 +70,7 @@ def test_main_menu_has_inline_buttons():
 
 def test_tasks_menu_has_all_views():
     screen = tasks_menu_screen()
-    for view in ("today", "week", "all", "no_group"):
+    for view in ("today", "week", "next_week", "all", "no_group"):
         assert TaskListCB(view=view).pack() in screen.html
     assert MenuCB(action="main").pack() in screen.html
 

@@ -82,3 +82,13 @@ class TaskService:
         start = datetime.combine(day, time.min, tz)
         end = start + timedelta(days=1)
         return await self._repo.list_due_between(start, end, limit=limit, offset=offset)
+
+    async def list_period(
+        self, start: date, end: date, *, tz: ZoneInfo, limit: int = 20, offset: int = 0
+    ) -> list:
+        """Задачи с дедлайном в включительном периоде [start, end]."""
+        start_dt = datetime.combine(start, time.min, tz)
+        end_dt = datetime.combine(end + timedelta(days=1), time.min, tz)
+        return await self._repo.list_due_between(
+            start_dt, end_dt, limit=limit, offset=offset
+        )

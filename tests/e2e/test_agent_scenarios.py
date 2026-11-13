@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 import pytest
 
@@ -744,6 +744,53 @@ async def test_agent_pages_task_list_by_seven(test_settings, session_factory, se
     assert back_messages == []
     page_back = harness.current(list_message).text or ""
     assert set(re.findall(r"Задача \d\d", page_back)) == first_page
+
+
+async def test_agent_task_period_next_week_without_llm(test_settings, session_factory, session):
+    tz = test_settings.tz
+    today = datetime.now(UTC).astimezone(tz).date()
+    next_monday = today + timedelta(days=7 - today.weekday())
+    far_start = today + timedelta(days=30)
+    service = TaskService(session)
+    await service.create_from_draft(
+        TaskDraft(
+            title="Текущая неделя",
+            due_at=datetime.combine(today, time(12), tzinfo=tz),
+        )
+    )
+    await service.create_from_draft(
+        TaskDraft(
+            title="Следующая неделя",
+            due_at=datetime.combine(next_monday, time(12), tzinfo=tz),
+        )
+    )
+    await service.create_from_draft(
+        TaskDraft(
+            title="Дальний период",
+            due_at=datetime.combine(far_start, time(12), tzinfo=tz),
+        )
+    )
+    await session.commit()
+
+    ai = FakeProvider()
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+    messages = await harness.send_text(
+        DEFAULT_USER_ID, "Выведи все задачи на следующую неделю"
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Следующая неделя" in combined
+    assert "Текущая неделя" not in combined
+    assert "Дальний период" not in combined
+    assert ai.plan_calls == []
+
+    messages = await harness.send_text(
+        DEFAULT_USER_ID,
+        f"Покажи задачи с {far_start:%d.%m} по {(far_start + timedelta(days=1)):%d.%m}",
+    )
+    combined = " ".join(m.text or "" for m in messages)
+    assert "Дальний период" in combined
+    assert "Следующая неделя" not in combined
+    assert ai.plan_calls == []
 
 
 async def test_agent_keeps_last_turns_in_context(test_settings, session_factory, session):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from aiogram import Router
 from aiogram.types import CallbackQuery, Message
@@ -28,6 +28,7 @@ from jarvis.bot.screens.core import (
 )
 from jarvis.bot.ui_state import last_task_list, remember_task_list
 from jarvis.config.settings import Settings
+from jarvis.conversation.dates import range_title
 from jarvis.conversation.engine import ConversationEngine
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.preview import task_view_title
@@ -47,12 +48,39 @@ async def build_task_list(
     service = TaskService(session)
     now = datetime.now(UTC)
     day = None
-    if view != "date" and view not in TASK_VIEWS:
+    if view not in ("date", "range", "next_week") and view not in TASK_VIEWS:
         return plain_screen(
             "📋 <b>Задачи</b>\nКнопка устарела — выберите список заново.",
             tasks_menu_keyboard(),
         )
-    if view == "date":
+    if view == "next_week":
+        today = now.astimezone(settings.tz).date()
+        start = today + timedelta(days=7 - today.weekday())
+        end = start + timedelta(days=6)
+        tasks = await service.list_period(
+            start, end, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+        )
+        title = range_title(start, end, today=today)
+    elif view == "range":
+        try:
+            start_text, end_text = value.split("|", 1)
+            start = date.fromisoformat(start_text)
+            end = date.fromisoformat(end_text)
+        except (ValueError, AttributeError):
+            return plain_screen(
+                "📋 Период не распознан — откройте список заново.", main_menu()
+            )
+        if end < start:
+            return plain_screen(
+                "📋 Период не распознан — откройте список заново.", main_menu()
+            )
+        tasks = await service.list_period(
+            start, end, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+        )
+        title = range_title(
+            start, end, today=now.astimezone(settings.tz).date()
+        )
+    elif view == "date":
         try:
             day = date.fromisoformat(value)
         except ValueError:

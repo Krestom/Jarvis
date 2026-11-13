@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from html import escape as html_escape
 from typing import TYPE_CHECKING, Any
 
@@ -19,7 +19,7 @@ from jarvis.ai.schemas import Interpretation
 from jarvis.bot.widgets.types import WidgetPayload
 from jarvis.bot.widgets.weather import WidgetTooLarge, render_weather_widget
 from jarvis.config.settings import Settings
-from jarvis.conversation.dates import parse_human_date
+from jarvis.conversation.dates import DateRange, parse_human_date, parse_human_range, range_title
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.heuristics import (
     extract_search_query,
@@ -77,7 +77,9 @@ def _ui_actions(interpretation: Interpretation) -> list[str]:
 
 # «Задачи на 19 октября»: глаголы-просьбы, для которых дата — фильтр списка,
 # а не срок создания задачи.
-_DATE_LIST_PREFIX = re.compile(r"(?i)^\s*(какие|что|выведи|покажи|дай|список|найди)\b")
+_DATE_LIST_PREFIX = re.compile(
+    r"(?i)^\s*(какие|что|выведи|покажи|дай|список|найди|задачи)\b"
+)
 
 # Ответы «срок не нужен» на вопрос «Нужен ли срок?» (задача без дедлайна).
 NO_DUE_ANSWERS = ("нет", "не надо", "не нужно", "без срока", "без дедлайна")
@@ -238,6 +240,12 @@ class ConversationEngine:
         ):
             return await self._do_search(telegram_user_id, text, page=0)
 
+        # «Задачи на следующую неделю», «с 20 по 27 ноября» — детерминированно,
+        # не отдаём диапазон на волю LLM и не подменяем его текущей неделей.
+        period = self._date_list_range(text)
+        if period is not None:
+            return await self._show_tasks_in_range(period.start, period.end)
+
         if self._agent_enabled():
             return await self._run_agent(telegram_user_id, text)
 
@@ -324,7 +332,15 @@ class ConversationEngine:
             return await self._show_comments(interpretation)
 
         if intent == "list_tasks":
-            view = str(interpretation.entities.get("view") or "week").strip()
+            entities = interpretation.entities
+            start = self._as_date(entities.get("start_date"))
+            end = self._as_date(entities.get("end_date"))
+            if start is not None and end is not None and end >= start:
+                return await self._show_tasks_in_range(start, end)
+            on_date = self._as_date(entities.get("on_date"))
+            if on_date is not None:
+                return await self._show_tasks_on_date(on_date)
+            view = str(entities.get("view") or "week").strip()
             return await self._show_task_list(view)
 
         if intent in _KNOWLEDGE_INTENTS:
@@ -533,6 +549,10 @@ class ConversationEngine:
 
     async def _show_task_list(self, view: str, page: int = 0) -> EngineOutcome:
         """Список задач по динамической группе («какие у меня задачи на неделю»)."""
+        if view == "next_week":
+            today = datetime.now(UTC).astimezone(self._settings.tz).date()
+            start = today + timedelta(days=7 - today.weekday())
+            return await self._show_tasks_in_range(start, start + timedelta(days=6), page)
         if view not in TASK_VIEWS:
             view = "week"
         now = datetime.now(UTC)
@@ -562,6 +582,27 @@ class ConversationEngine:
             page=page,
             value=day.isoformat(),
             day=day,
+        )
+
+    async def _show_tasks_in_range(
+        self, start: date, end: date, page: int = 0
+    ) -> EngineOutcome:
+        """Список задач за включительный период дат."""
+        now = datetime.now(UTC)
+        tasks = await TaskService(self._session).list_period(
+            start,
+            end,
+            tz=self._settings.tz,
+            limit=TASK_LIST_LIMIT,
+            offset=page * TASK_LIST_LIMIT,
+        )
+        title = range_title(start, end, today=now.astimezone(self._settings.tz).date())
+        return self._render_task_list(
+            title,
+            tasks,
+            view="range",
+            page=page,
+            value=f"{start.isoformat()}|{end.isoformat()}",
         )
 
     async def _show_documents(self) -> EngineOutcome:
@@ -1086,6 +1127,15 @@ class ConversationEngine:
         )
         return outcome
 
+    def _date_list_range(self, text: str) -> DateRange | None:
+        """«Задачи на следующую неделю / с 20 по 27 ноября» — без AI."""
+        lowered = text.lower()
+        if not _DATE_LIST_PREFIX.search(text):
+            return None
+        if "задач" not in lowered and "что у меня" not in lowered and "какие у меня" not in lowered:
+            return None
+        return parse_human_range(text, datetime.now(UTC), self._settings.tz)
+
     def _date_list_day(self, text: str) -> date | None:
         """«Задачи на <дата>» — детерминированный список, без AI."""
         if "задач" not in text.lower() or not _DATE_LIST_PREFIX.search(text):
@@ -1094,6 +1144,15 @@ class ConversationEngine:
         if not matched or parsed is None:
             return None
         return parsed.date()
+
+    @staticmethod
+    def _as_date(value: Any) -> date | None:
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(str(value))
+        except ValueError:
+            return None
 
     def _parse_due_at(self, value: Any) -> datetime | None:
         if not value:

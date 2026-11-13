@@ -3,7 +3,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from jarvis.conversation.dates import parse_human_date
+from jarvis.conversation.dates import parse_human_date, parse_human_range
 
 TZ = ZoneInfo("Europe/Moscow")
 # 2026-10-15 — четверг.
@@ -109,3 +109,57 @@ def test_no_match_returns_none() -> None:
 def test_invalid_date_returns_none() -> None:
     value, matched = parse_human_date("31.02.2026", NOW, TZ)
     assert value is None or not matched
+
+
+def range_dates(text: str):
+    value = parse_human_range(text, NOW, TZ)
+    assert value is not None
+    return value.start.isoformat(), value.end.isoformat()
+
+
+def test_next_week_range() -> None:
+    assert range_dates("задачи на следующую неделю") == ("2026-10-19", "2026-10-25")
+
+
+def test_current_week_range() -> None:
+    assert range_dates("задачи на этой неделе") == ("2026-10-12", "2026-10-18")
+
+
+def test_previous_week_range() -> None:
+    assert range_dates("задачи на прошлой неделе") == ("2026-10-05", "2026-10-11")
+
+
+def test_day_range_same_month_name() -> None:
+    assert range_dates("задачи с 20 по 27 ноября") == ("2026-11-20", "2026-11-27")
+    assert range_dates("задачи 20–27 ноября") == ("2026-11-20", "2026-11-27")
+
+
+def test_day_range_numeric() -> None:
+    assert range_dates("задачи с 20.11 по 27.11") == ("2026-11-20", "2026-11-27")
+    assert range_dates("задачи 20.11-27.11") == ("2026-11-20", "2026-11-27")
+
+
+def test_range_across_months() -> None:
+    assert range_dates("задачи с 20 ноября по 5 декабря") == (
+        "2026-11-20",
+        "2026-12-05",
+    )
+
+
+def test_iso_range() -> None:
+    assert range_dates("задачи с 2026-11-20 по 2026-11-27") == (
+        "2026-11-20",
+        "2026-11-27",
+    )
+
+
+def test_range_with_bare_end_day() -> None:
+    assert range_dates("задачи с 20 ноября по 27") == ("2026-11-20", "2026-11-27")
+
+
+def test_month_range() -> None:
+    assert range_dates("задачи на следующем месяце") == ("2026-11-01", "2026-11-30")
+
+
+def test_no_range_returns_none() -> None:
+    assert parse_human_range("задачи на 22.10.2026", NOW, TZ) is None
