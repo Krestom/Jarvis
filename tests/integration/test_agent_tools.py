@@ -132,6 +132,24 @@ async def test_update_task_can_clear_due_date(session, test_settings):
     assert (await TaskRepository(session).get(task_id)).due_at is None
 
 
+async def test_create_task_naive_due_at_uses_user_timezone(session, test_settings):
+    from jarvis.services.confirmation import ConfirmationService
+
+    registry = make_registry(session, test_settings)
+    result = await registry.call(
+        "create_task",
+        {"title": "Позвонить в банк", "due_at": "2026-12-01T18:00:00"},
+    )
+    assert result.ok is True
+
+    outcome = await ConfirmationService(session, test_settings).confirm(
+        USER, registry.pending_operation_ids[0]
+    )
+    assert outcome.ok is True
+    task = await TaskRepository(session).get(uuid.UUID(outcome.entity_id))
+    assert task.due_at.astimezone(test_settings.tz).strftime("%H:%M") == "18:00"
+
+
 async def test_daily_stats_counts_and_lists(session, test_settings):
     from datetime import datetime
 
@@ -327,7 +345,7 @@ async def test_create_knowledge_tool_needs_confirmation_and_flags_secrets(
         "create_knowledge",
         {
             "title": "Доступ к серверу Supersport",
-            "content": "ssh 2.28.205.186, user deploy, пароль supersport",
+            "content": "ssh 203.0.113.10, user testuser, пароль not-a-real-password",
         },
     )
     assert result.ok is True

@@ -28,7 +28,8 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(
-            r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key)\b\s*[:=]\s*\S+"
+            r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|пароль|токен|секрет)\b"
+            r"\s*[:=]\s*\S+"
         ),
         r"\1=[REDACTED]",
     ),

@@ -907,7 +907,7 @@ async def test_agent_saves_credentials_through_confirmation(
             tool="create_knowledge",
             args={
                 "title": "Доступ к серверу Supersport",
-                "content": "ssh 2.28.205.186, user deploy, пароль supersport",
+                "content": "ssh 203.0.113.10, user testuser, пароль not-a-real-password",
             },
         )
     )
@@ -919,7 +919,7 @@ async def test_agent_saves_credentials_through_confirmation(
     messages = await harness.send_text(
         DEFAULT_USER_ID,
         "Джарвис, сохрани креды для доступа по ssh: "
-        "2.28.205.186, user deploy, пароль supersport",
+        "203.0.113.10, user testuser, пароль not-a-real-password",
     )
     assert any("Нажмите «Подтвердить»" in (m.text or "") for m in messages)
     assert await KnowledgeRepository(session).list_recent() == []

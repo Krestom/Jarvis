@@ -51,7 +51,7 @@ class ImprovementService:
             traceback_text=traceback_text,
             extra=context,
         )
-        title = title.strip()[:300]
+        title = redact(title.strip())[:300]
         existing = await self._repo.find_open_by_signature(
             source=ImprovementSource.TECHNICAL_EVENT, component=component, title=title
         )
@@ -59,7 +59,7 @@ class ImprovementService:
             await self._repo.register_occurrence(
                 existing,
                 correlation_id=correlation_id,
-                note=summary.strip()[:500] or None,
+                note=redact(summary.strip())[:500] or None,
                 diagnostic_context=diagnostic,
             )
             log.info("improvement item %s: occurrence %s", existing.id, existing.occurrence_count)
@@ -69,7 +69,7 @@ class ImprovementService:
             category=category,
             source=ImprovementSource.TECHNICAL_EVENT,
             title=title,
-            summary=summary.strip() or title,
+            summary=redact(summary.strip()) or title,
             component=component,
             correlation_id=correlation_id,
             app_version=__version__,
@@ -149,7 +149,7 @@ class ImprovementService:
             correlation_id=correlation_id,
             extra={"evidence": evidence} if evidence else None,
         )
-        title = title.strip()[:300]
+        title = redact(title.strip())[:300]
         existing = await self._repo.find_open_by_signature(
             source=ImprovementSource.USER_OBSERVATION, component=None, title=title
         )
@@ -157,7 +157,7 @@ class ImprovementService:
             await self._repo.register_occurrence(
                 existing,
                 correlation_id=correlation_id,
-                note=summary.strip()[:500] or None,
+                note=redact(summary.strip())[:500] or None,
                 diagnostic_context=diagnostic,
             )
             return existing
@@ -165,7 +165,7 @@ class ImprovementService:
             category=ImprovementCategory.MISSING_CAPABILITY,
             source=ImprovementSource.USER_OBSERVATION,
             title=title,
-            summary=summary.strip() or title,
+            summary=redact(summary.strip()) or title,
             correlation_id=correlation_id,
             app_version=__version__,
             diagnostic_context=diagnostic,

@@ -22,6 +22,11 @@ async def test_export_backlog_redacts_secrets_and_filters(session, test_settings
         summary="В логе виден токен: Authorization: Bearer abcdef0123456789abcdef",
         component="telegram_bot",
     )
+    await service.record_failure(
+        title="Ошибка входа: пароль: hunter2",
+        summary="Пароль: hunter2 не подошёл",
+        component="telegram_bot",
+    )
     await service.record_hypothesis(
         ImprovementHypothesis(
             category="improvement_idea",
@@ -35,17 +40,23 @@ async def test_export_backlog_redacts_secrets_and_filters(session, test_settings
     result = await export_backlog(
         repo, statuses=None, category=None, tz=test_settings.tz
     )
-    assert result.item_count == 2
+    assert result.item_count == 3
     assert "Сбой при отправке" in result.markdown
     assert "abcdef0123456789abcdef" not in result.markdown
+    assert "hunter2" not in result.markdown
     assert "[REDACTED" in result.markdown
 
     payload = json.loads(result.json_text)
-    assert payload["count"] == 2
+    assert payload["count"] == 3
     assert payload["filters"]["statuses"] == "all"
     assert "abcdef0123456789abcdef" not in result.json_text
+    assert "hunter2" not in result.json_text
     titles = {item["title"] for item in payload["items"]}
-    assert titles == {"Сбой при отправке", "Идея: тёмная тема"}
+    assert titles == {
+        "Сбой при отправке",
+        "Ошибка входа: пароль=[REDACTED]",
+        "Идея: тёмная тема",
+    }
     # Свидетельства повторов попадают в JSON.
     exported = next(item for item in payload["items"] if item["occurrence_count"] == 1)
     assert len(exported["events"]) == 1

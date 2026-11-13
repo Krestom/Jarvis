@@ -29,6 +29,12 @@ class RedactingFilter(logging.Filter):
         record.correlation_id = correlation_id_var.get()
         record.msg = redact(record.getMessage())
         record.args = None
+        if record.exc_text:
+            record.exc_text = redact(record.exc_text)
+        elif record.exc_info:
+            record.exc_text = redact(
+                logging.Formatter().formatException(record.exc_info)
+            )
         return True
 
 

@@ -26,6 +26,30 @@ def test_redacts_password_assignment() -> None:
     assert "password=[REDACTED]" in result
 
 
+def test_redacts_russian_password_assignment() -> None:
+    result = redact("пароль: qwerty123")
+    assert "qwerty123" not in result
+    assert "пароль=[REDACTED]" in result
+
+
+def test_filter_redacts_traceback() -> None:
+    import logging
+    import sys
+
+    from jarvis.logging_setup import RedactingFilter
+
+    try:
+        raise RuntimeError("пароль: hunter2-super-secret")
+    except RuntimeError:
+        record = logging.LogRecord(
+            "test", logging.ERROR, __file__, 1, "boom", None, sys.exc_info()
+        )
+    RedactingFilter().filter(record)
+    text = logging.Formatter("%(message)s").format(record)
+    assert "hunter2-super-secret" not in text
+    assert "REDACTED" in text
+
+
 def test_redacts_private_key_block() -> None:
     text = "-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----"
     result = redact(text)
