@@ -17,7 +17,7 @@ from jarvis.bot.keyboards import (
     diagnostics_keyboard,
     pack_origin,
 )
-from jarvis.bot.rich import RichScreen, button, esc, row
+from jarvis.bot.rich import RichScreen, button, esc, esc_br, row
 from jarvis.conversation.preview import fmt_dt_local
 from jarvis.db.models import ImprovementEvent, ImprovementItem
 from jarvis.repositories.improvements import OPEN_STATUSES
@@ -201,7 +201,7 @@ def _events_html(events: Sequence[ImprovementEvent], tz: ZoneInfo) -> str:
     for index, event in enumerate(shown, start=len(events) - len(shown) + 1):
         parts = [f"<b>{index}.</b> {fmt_dt_local(event.occurred_at, tz)}"]
         if event.note:
-            parts.append(esc(event.note))
+            parts.append(esc_br(event.note))
         if event.correlation_id:
             parts.append(f"<code>{esc(event.correlation_id)}</code>")
         lines.append("<br>".join(parts))
@@ -240,7 +240,7 @@ def backlog_card_screen(
         parts.append(f"<p>Достоверность гипотезы: {item.confidence:.2f}</p>")
     if item.component:
         parts.append(f"<p>Компонент: <code>{esc(item.component)}</code></p>")
-    parts.append(f"<p>{esc(item.summary)}</p>")
+    parts.append(f"<p>{esc_br(item.summary)}</p>")
     for label, value in (
         ("Ожидалось", item.expected_behavior),
         ("Фактически", item.actual_behavior),
@@ -249,7 +249,7 @@ def backlog_card_screen(
         ("Предлагаемое исправление", item.proposed_fix),
     ):
         if value:
-            parts.append(f"<p><b>{label}:</b> {esc(value)}</p>")
+            parts.append(f"<p><b>{label}:</b> {esc_br(value)}</p>")
     context = _context_text(item)
     if context:
         parts.append(

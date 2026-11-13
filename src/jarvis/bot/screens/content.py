@@ -23,7 +23,7 @@ from jarvis.bot.keyboards import (
     secret_card_keyboard,
     secrets_list_keyboard,
 )
-from jarvis.bot.rich import RichScreen, button, row
+from jarvis.bot.rich import RichScreen, button, esc_br, row
 from jarvis.conversation.preview import (
     DOCUMENT_TYPE_LABELS,
     KNOWLEDGE_TYPE_LABELS,
@@ -108,13 +108,13 @@ def knowledge_card_screen(item, *, full: bool = False) -> RichScreen:
             f"<p><b>Чувствительность:</b> {esc(_sensitivity_label(item.sensitivity))}</p>"
         )
     if item.summary:
-        parts.append(f"<blockquote>{esc(item.summary)}</blockquote>")
+        parts.append(f"<blockquote>{esc_br(item.summary)}</blockquote>")
     if full:
-        parts.append(f"<blockquote>{esc(item.content)}</blockquote>")
+        parts.append(f"<blockquote>{esc_br(item.content)}</blockquote>")
     else:
         preview = item.content if len(item.content) <= 400 else item.content[:399] + "…"
         if preview:
-            parts.append(f"<blockquote>{esc(preview)}</blockquote>")
+            parts.append(f"<blockquote>{esc_br(preview)}</blockquote>")
 
     toggle = (
         button("📕 Свернуть", KbCB(action="view", item_id=item_id).pack())
@@ -295,7 +295,7 @@ def secret_card_screen(secret) -> RichScreen:
         f"<p><b>Тип:</b> {esc(secret.secret_type)}</p>",
     ]
     if secret.purpose:
-        parts.append(f"<blockquote>{esc(secret.purpose)}</blockquote>")
+        parts.append(f"<blockquote>{esc_br(secret.purpose)}</blockquote>")
     parts.append(
         "<p><i>Значение хранится в зашифрованном виде и не показывается в поиске.</i></p>"
     )

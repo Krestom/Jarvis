@@ -16,7 +16,7 @@ from jarvis.bot.keyboards import (
     task_list_keyboard,
     tasks_menu_keyboard,
 )
-from jarvis.bot.rich import RichScreen, button, esc, row
+from jarvis.bot.rich import RichScreen, button, esc, esc_br, row
 from jarvis.bot.texts import HELP_TEXT
 from jarvis.conversation.preview import (
     STATUS_LABELS,
@@ -165,7 +165,7 @@ def task_card_screen(
     task_id = uuid_hex(task.id)
     parts = [f"<h3>{icon} Задача</h3>", f"<p><b>{esc(task.title)}</b></p>"]
     if task.description:
-        description = esc(task.description)
+        description = esc_br(task.description)
         if len(description) > 300:
             parts.append(
                 "<details><summary>Описание</summary>"
@@ -183,14 +183,14 @@ def task_card_screen(
             original = original[:399] + "…"
         parts.append(
             "<details><summary>Исходный текст</summary>"
-            f"<blockquote>{esc(original)}</blockquote></details>"
+            f"<blockquote>{esc_br(original)}</blockquote></details>"
         )
     if comments:
         shown = comments[-3:]
         lines = []
         for index, comment in enumerate(shown, start=len(comments) - len(shown) + 1):
             stamp = fmt_dt_local(comment.created_at, tz)
-            lines.append(f"<b>{index}.</b> {esc(comment.content)}<br><i>{stamp}</i>")
+            lines.append(f"<b>{index}.</b> {esc_br(comment.content)}<br><i>{stamp}</i>")
         if len(comments) > len(shown):
             lines.append(f"<i>… ещё {len(comments) - len(shown)}</i>")
         parts.append(
@@ -245,7 +245,7 @@ def comments_screen(task, comments, tz: ZoneInfo) -> RichScreen:
         lines = []
         for index, comment in enumerate(comments, start=1):
             stamp = fmt_dt_local(comment.created_at, tz)
-            lines.append(f"<b>{index}.</b> {esc(comment.content)}<br><i>{stamp}</i>")
+            lines.append(f"<b>{index}.</b> {esc_br(comment.content)}<br><i>{stamp}</i>")
         parts.append(f"<blockquote>{'<br>'.join(lines)}</blockquote>")
     else:
         parts.append("<p>Комментариев пока нет.</p>")

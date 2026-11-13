@@ -37,6 +37,11 @@ def esc(value: object) -> str:
     return html_lib.escape(str(value))
 
 
+def esc_br(value: object) -> str:
+    """Экранировать и сохранить переносы строк внутри rich-абзаца."""
+    return html_lib.escape(str(value)).replace("\n", "<br>")
+
+
 def row(*buttons: str, align: str = "center") -> str:
     return f'<tg-button-row align="{align}">' + "".join(buttons) + "</tg-button-row>"
 
@@ -168,6 +173,7 @@ __all__ = [
     "disabled_button",
     "divider",
     "esc",
+    "esc_br",
     "markup_rows",
     "plain_screen",
     "row",
