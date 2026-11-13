@@ -44,8 +44,9 @@ async def send_secrets_list(
     message: Message, session: AsyncSession, settings: Settings, *, page: int, edit: bool = False
 ) -> None:
     service = SecretService(session, settings)
-    secrets = await service.list_metadata(limit=PAGE_SIZE, offset=page * PAGE_SIZE)
-    screen = secret_list_screen(secrets, page, has_next=len(secrets) >= PAGE_SIZE)
+    secrets = await service.list_metadata(limit=PAGE_SIZE + 1, offset=page * PAGE_SIZE)
+    has_next = len(secrets) > PAGE_SIZE
+    screen = secret_list_screen(secrets[:PAGE_SIZE], page, has_next=has_next)
     await send_rich(message, screen, edit=edit)
 
 

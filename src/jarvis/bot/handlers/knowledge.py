@@ -23,8 +23,9 @@ async def send_knowledge_list(
     message: Message, session: AsyncSession, *, page: int, edit: bool = False
 ) -> None:
     repo = KnowledgeRepository(session)
-    items = await repo.list_recent(limit=PAGE_SIZE, offset=page * PAGE_SIZE)
-    screen = knowledge_list_screen(items, page, has_next=len(items) >= PAGE_SIZE)
+    items = await repo.list_recent(limit=PAGE_SIZE + 1, offset=page * PAGE_SIZE)
+    has_next = len(items) > PAGE_SIZE
+    screen = knowledge_list_screen(items[:PAGE_SIZE], page, has_next=has_next)
     await send_rich(message, screen, edit=edit)
 
 

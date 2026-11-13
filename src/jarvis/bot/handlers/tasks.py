@@ -47,6 +47,7 @@ async def build_task_list(
 ) -> RichScreen:
     service = TaskService(session)
     now = datetime.now(UTC)
+    fetch_limit = PAGE_SIZE + 1
     day = None
     if view not in ("date", "range", "next_week") and view not in TASK_VIEWS:
         return plain_screen(
@@ -58,7 +59,7 @@ async def build_task_list(
         start = today + timedelta(days=7 - today.weekday())
         end = start + timedelta(days=6)
         tasks = await service.list_period(
-            start, end, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+            start, end, tz=settings.tz, limit=fetch_limit, offset=page * PAGE_SIZE
         )
         title = range_title(start, end, today=today)
     elif view == "range":
@@ -75,7 +76,7 @@ async def build_task_list(
                 "📋 Период не распознан — откройте список заново.", main_menu()
             )
         tasks = await service.list_period(
-            start, end, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+            start, end, tz=settings.tz, limit=fetch_limit, offset=page * PAGE_SIZE
         )
         title = range_title(
             start, end, today=now.astimezone(settings.tz).date()
@@ -86,25 +87,26 @@ async def build_task_list(
         except ValueError:
             return plain_screen("📋 Дата не распознана — откройте список заново.", main_menu())
         tasks = await service.list_on_date(
-            day, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+            day, tz=settings.tz, limit=fetch_limit, offset=page * PAGE_SIZE
         )
         title = f"📋 Задачи на {day.strftime('%d.%m.%Y')}"
     else:
         tasks = await service.list_view(
-            view, now=now, tz=settings.tz, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+            view, now=now, tz=settings.tz, limit=fetch_limit, offset=page * PAGE_SIZE
         )
         title = task_view_title(view, now, settings.tz)
         if view == "today":
             day = now.astimezone(settings.tz).date()
+    has_next = len(tasks) > PAGE_SIZE
     return task_list_screen(
         title=title,
-        tasks=tasks,
+        tasks=tasks[:PAGE_SIZE],
         tz=settings.tz,
         now=now,
         view=view,
         page=page,
         value=value,
-        has_next=len(tasks) >= PAGE_SIZE,
+        has_next=has_next,
         day=day,
     )
 

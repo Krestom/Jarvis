@@ -317,6 +317,28 @@ async def test_task_card_back_returns_to_same_list(
     assert "Назад 8" in (back.text or "")
 
 
+async def test_exactly_seven_tasks_hide_next_button(
+    classic_settings, session_factory, session
+):
+    service = TaskService(session)
+    for index in range(1, 8):
+        await service.create_from_draft(TaskDraft(title=f"Ровно {index}"))
+    await session.commit()
+
+    harness = await make_harness(classic_settings, session_factory)
+    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    menu = keyboard_messages(messages)[-1]
+    await harness.click_button(DEFAULT_USER_ID, menu, "Все задачи")
+    page = harness.current(menu)
+    labels = [
+        button.text
+        for row in page.reply_markup.inline_keyboard
+        for button in row
+    ]
+    assert "➡️" not in labels
+    assert "Страница 2" not in (page.text or "")
+
+
 # 2b. Ошибка/лимит транскрибации показывается прямо в чате.
 async def test_scenario_voice_transcription_error_shown(
     classic_settings, session_factory, session

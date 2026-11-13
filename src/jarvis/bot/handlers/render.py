@@ -198,15 +198,17 @@ async def send_outcome(
         from jarvis.bot.keyboards import PAGE_SIZE
         from jarvis.bot.screens.content import document_list_screen
 
+        has_next = len(outcome.documents) > PAGE_SIZE
         list_screen = document_list_screen(
-            outcome.documents, 0, has_next=len(outcome.documents) >= PAGE_SIZE
+            outcome.documents[:PAGE_SIZE], 0, has_next=has_next
         )
     elif outcome.knowledge:
         from jarvis.bot.keyboards import PAGE_SIZE
         from jarvis.bot.screens.content import knowledge_list_screen
 
+        has_next = len(outcome.knowledge) > PAGE_SIZE
         list_screen = knowledge_list_screen(
-            outcome.knowledge, 0, has_next=len(outcome.knowledge) >= PAGE_SIZE
+            outcome.knowledge[:PAGE_SIZE], 0, has_next=has_next
         )
     if list_screen is not None:
         await send_rich(message, list_screen)
@@ -294,7 +296,8 @@ async def send_search_results(
 
     from jarvis.bot.keyboards import PAGE_SIZE
 
-    has_next = len(hits) >= PAGE_SIZE
+    has_next = len(hits) > PAGE_SIZE
+    hits = hits[:PAGE_SIZE]
     markup = search_results_keyboard(
         hits, query, outcome.search_page, has_next=has_next
     )

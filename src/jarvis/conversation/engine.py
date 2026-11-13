@@ -560,7 +560,7 @@ class ConversationEngine:
             view,
             now=now,
             tz=self._settings.tz,
-            limit=TASK_LIST_LIMIT,
+            limit=TASK_LIST_LIMIT + 1,
             offset=page * TASK_LIST_LIMIT,
         )
         title = task_view_title(view, now, self._settings.tz)
@@ -572,7 +572,7 @@ class ConversationEngine:
         tasks = await TaskService(self._session).list_on_date(
             day,
             tz=self._settings.tz,
-            limit=TASK_LIST_LIMIT,
+            limit=TASK_LIST_LIMIT + 1,
             offset=page * TASK_LIST_LIMIT,
         )
         return self._render_task_list(
@@ -593,7 +593,7 @@ class ConversationEngine:
             start,
             end,
             tz=self._settings.tz,
-            limit=TASK_LIST_LIMIT,
+            limit=TASK_LIST_LIMIT + 1,
             offset=page * TASK_LIST_LIMIT,
         )
         title = range_title(start, end, today=now.astimezone(self._settings.tz).date())
@@ -608,7 +608,7 @@ class ConversationEngine:
     async def _show_documents(self) -> EngineOutcome:
         """Список документов («покажи список документов», экран агента documents)."""
         documents = await DocumentRepository(self._session).list_active(
-            limit=LIST_PAGE_LIMIT,
+            limit=LIST_PAGE_LIMIT + 1,
         )
         title = "📄 <b>Документы</b>"
         if not documents:
@@ -624,7 +624,9 @@ class ConversationEngine:
 
     async def _show_knowledge_list(self) -> EngineOutcome:
         """Список знаний («покажи список знаний», экран агента knowledge)."""
-        items = await KnowledgeRepository(self._session).list_recent(limit=LIST_PAGE_LIMIT)
+        items = await KnowledgeRepository(self._session).list_recent(
+            limit=LIST_PAGE_LIMIT + 1
+        )
         if not items:
             return EngineOutcome(
                 "📚 Пока пусто. Напишите заметку — я предложу её сохранить.",
@@ -645,6 +647,8 @@ class ConversationEngine:
         value: str = "",
         day=None,
     ) -> EngineOutcome:
+        has_next = len(tasks) > TASK_LIST_LIMIT
+        tasks = tasks[:TASK_LIST_LIMIT]
         text = task_list_text(
             title, tasks, self._settings.tz, datetime.now(UTC), day=day
         )
@@ -655,7 +659,7 @@ class ConversationEngine:
             task_choices=list(tasks),
             task_choices_action="view",
             task_choices_prompt="Нажмите на задачу, чтобы открыть карточку:",
-            task_page=(view, page, value, len(tasks) >= TASK_LIST_LIMIT) if view else None,
+            task_page=(view, page, value, has_next) if view else None,
         )
 
     async def _show_comments(self, interpretation: Interpretation) -> EngineOutcome:
@@ -1081,7 +1085,9 @@ class ConversationEngine:
         if not query:
             return EngineOutcome("Напишите, что искать.")
         offset = page * SEARCH_PAGE_SIZE
-        hits = await self._search.search(query, limit=SEARCH_PAGE_SIZE, offset=offset)
+        hits = await self._search.search(
+            query, limit=SEARCH_PAGE_SIZE + 1, offset=offset
+        )
         await self._store.set(
             telegram_user_id,
             Flow.SEARCH_WAIT,

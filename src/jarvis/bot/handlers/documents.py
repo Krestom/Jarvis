@@ -40,11 +40,12 @@ async def send_documents_list(
     edit: bool = False,
 ) -> None:
     documents = await DocumentRepository(session).list_active(
-        limit=PAGE_SIZE,
+        limit=PAGE_SIZE + 1,
         offset=page * PAGE_SIZE,
     )
+    has_next = len(documents) > PAGE_SIZE
     screen = document_list_screen(
-        documents, page, has_next=len(documents) >= PAGE_SIZE
+        documents[:PAGE_SIZE], page, has_next=has_next
     )
     await send_rich(message, screen, edit=edit)
 
