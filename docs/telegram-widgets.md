@@ -634,5 +634,7 @@ Issue [#2006](https://github.com/aiogram/aiogram/issues/2006) открыт.
 
 Текущий статус (2026-11-13): прод-бот получает
 `INPUT_MEDIA_WIDGET_NOT_ALLOWED` даже на минимальный `sendWidget`, поэтому
-используется rich-message fallback (`bot/widgets/send.py`). Это rollout
-Telegram, а не ошибка HTML: когда виджеты разрешат, код переключится сам.
+используется rich-message fallback (`bot/widgets/send.py`). Это глобальный
+сбой/rollout Telegram с ~15:09 UTC, подтверждён в
+<https://github.com/TelegramMessenger/widget-sandbox/issues/8>; когда виджеты
+разрешат, код переключится сам.

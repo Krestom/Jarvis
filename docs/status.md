@@ -122,8 +122,11 @@
   (удаление знаний — кнопкой в карточке /knowledge).
 - Погода: Telegram пока отклоняет виджеты Bot API 10.4 для текущего бота
   (`INPUT_MEDIA_WIDGET_NOT_ALLOWED`), поэтому `/weather` и утренняя сводка
-  отправляют нативную rich-карточку. Когда виджеты включат, код переключится
-  на них автоматически (fallback уже в `bot/widgets/send.py`).
+  отправляют нативную rich-карточку. Это глобальный сбой Telegram с
+  2026-11-13 ~15:09 UTC, подтверждён в
+  https://github.com/TelegramMessenger/widget-sandbox/issues/8;
+  `sendMessage` и `sendRichMessage` работают. Когда виджеты включат, код
+  переключится на них автоматически (fallback уже в `bot/widgets/send.py`).
 
 ## Итерация 2026-10-17 (по аудиту, коммиты после `ecbf403`)
 
