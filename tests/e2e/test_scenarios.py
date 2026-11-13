@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from jarvis.ai.fake import FakeProvider
 from jarvis.ai.schemas import Interpretation
 from jarvis.bot.app import create_dispatcher
+from jarvis.conversation.flows import Flow
 from jarvis.db.models import KnowledgeItem, Task
 from jarvis.documents.storage import EncryptedFileStorage
 from jarvis.domain.enums import (
@@ -217,6 +218,44 @@ async def test_stale_button_sends_new_message_and_resets_flow(
     assert await ConversationRepository(session).get(DEFAULT_USER_ID) is None
     assert replies
     assert any("Задачи на сегодня" in (m.text or "") for m in replies)
+
+
+async def test_old_task_list_callback_shows_tasks_menu(
+    classic_settings, session_factory
+):
+    """Callback старой кнопки (inbox) не падает, а возвращает меню списков."""
+    harness = await make_harness(classic_settings, session_factory)
+    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    menu = keyboard_messages(messages)[-1]
+
+    replies = await harness.click_data(DEFAULT_USER_ID, menu, "tl:inbox:0:")
+
+    assert replies == []
+    current = harness.current(menu)
+    assert "Кнопка устарела" in (current.text or "")
+    labels = [
+        button.text for row in current.reply_markup.inline_keyboard for button in row
+    ]
+    assert "📋 Все задачи" in labels
+
+
+async def test_search_wait_is_cleared_by_menu_and_command(
+    classic_settings, session_factory, session
+):
+    harness = await make_harness(classic_settings, session_factory)
+    start = await harness.send_text(DEFAULT_USER_ID, "/start")
+    menu = keyboard_messages(start)[-1]
+
+    await harness.send_text(DEFAULT_USER_ID, "/search")
+    state = await ConversationRepository(session).get(DEFAULT_USER_ID)
+    assert state is not None and state.flow == Flow.SEARCH_WAIT
+
+    await harness.click_button(DEFAULT_USER_ID, menu, "Задачи")
+    assert await ConversationRepository(session).get(DEFAULT_USER_ID) is None
+
+    await harness.send_text(DEFAULT_USER_ID, "/search")
+    await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    assert await ConversationRepository(session).get(DEFAULT_USER_ID) is None
 
 
 async def test_reminder_complete_button_closes_task(
@@ -438,6 +477,50 @@ async def test_pending_task_rename_via_edit(classic_settings, session_factory, s
 
     tasks = await TaskRepository(session).search("Отчёт по УВ")
     assert [task.title for task in tasks] == ["Отчёт по УВ"]
+
+
+async def test_delete_confirmation_hides_edit_button(
+    classic_settings, session_factory, session
+):
+    """«Изменить» показывается только там, где сценарий правки поддерживается."""
+    await TaskService(session).create_from_draft(TaskDraft(title="Удалить меня"))
+    await session.commit()
+    harness = await make_harness(classic_settings, session_factory)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "/tasks")
+    menu = keyboard_messages(messages)[-1]
+    await harness.click_button(DEFAULT_USER_ID, menu, "Все задачи")
+    listing = harness.current(menu)
+    await harness.click_button(DEFAULT_USER_ID, listing, "Удалить меня")
+    card = harness.current(menu)
+
+    replies = await harness.click_button(DEFAULT_USER_ID, card, "Удалить")
+    preview = keyboard_messages(replies)[-1]
+    labels = [
+        button.text for row in preview.reply_markup.inline_keyboard for button in row
+    ]
+    assert "✅ Подтвердить" in labels
+    assert "✏️ Изменить" not in labels
+
+
+async def test_naive_due_at_uses_user_timezone(classic_settings, session_factory, session):
+    """LLM вернул срок без offset: 18:00 должно остаться 18:00 по МСК."""
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="create_task",
+            entities={"title": "Позвонить в банк", "due_at": "2026-12-01T18:00:00"},
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(classic_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "поставь задачу на 1 декабря в 18:00")
+    await confirm_last(harness, DEFAULT_USER_ID, messages)
+    await session.commit()
+
+    tasks = await TaskRepository(session).search("Позвонить в банк")
+    assert tasks[0].due_at.astimezone(classic_settings.tz).strftime("%H:%M") == "18:00"
 
 
 # 5.2. Задача без срока: сначала уточняем, нужен ли срок.
@@ -695,6 +778,8 @@ async def test_scenario_force_save_secret(classic_settings, session_factory, ses
         DEFAULT_USER_ID, "Запомни пароль от роутера: password=SuperSecret123"
     )
     assert any("есть секрет" in (m.text or "") for m in messages)
+    combined = " ".join(m.text or "" for m in messages)
+    assert "MCP её не увидит" in combined
     assert any("Всё равно сохранить" in (b.text or "")
                for m in messages if isinstance(m.reply_markup, InlineKeyboardMarkup)
                for row in m.reply_markup.inline_keyboard for b in row)
@@ -712,6 +797,27 @@ async def test_scenario_force_save_secret(classic_settings, session_factory, ses
     assert len(items) == 1
     assert items[0].sensitivity == Sensitivity.SENSITIVE
     assert "SuperSecret123" in items[0].content
+
+
+async def test_force_save_warns_when_mcp_sees_sensitive(
+    classic_settings, session_factory, session
+):
+    settings = classic_settings.model_copy(update={"mcp_include_sensitive": True})
+    ai = FakeProvider()
+    ai.queue(
+        Interpretation(
+            intent="create_knowledge",
+            entities={"title": "Пароль от роутера", "content": "password=SuperSecret123"},
+            sensitivity_hints=["secret"],
+            confidence=0.9,
+        )
+    )
+    harness = await make_harness(settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "Запомни пароль от роутера")
+    combined = " ".join(m.text or "" for m in messages)
+    assert "MCP её увидит" in combined
+    assert "MCP её не увидит" not in combined
 
 
 # 12. «Какие у меня задачи на неделю» — выводим список, а не «ничего не нашёл».

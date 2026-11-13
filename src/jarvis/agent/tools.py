@@ -864,6 +864,12 @@ class ToolRegistry:
             },
         )
 
+    def _due_in_tz(self, value: datetime | None) -> datetime | None:
+        """Naive due_at от LLM трактуем в часовом поясе пользователя, не UTC."""
+        if value is None or value.tzinfo is not None:
+            return value
+        return value.replace(tzinfo=self._settings.tz)
+
     async def _create_knowledge(self, args: CreateKnowledgeArgs) -> ToolResult:
         sensitive = args.sensitive or looks_like_secret(args.content) or looks_like_secret(
             args.title
@@ -889,7 +895,7 @@ class ToolRegistry:
         draft = TaskDraft(
             title=args.title,
             description=args.description,
-            due_at=args.due_at,
+            due_at=self._due_in_tz(args.due_at),
         )
         result = await self._propose(
             PendingOpType.CREATE_TASK,
@@ -902,6 +908,8 @@ class ToolRegistry:
     async def _update_task(self, args: UpdateTaskArgs) -> ToolResult:
         # exclude_unset: меняем только явно переданные поля; mode="json" — payload уйдёт в JSONB.
         raw = args.model_dump(exclude={"task_id"}, exclude_unset=True, mode="json")
+        if args.due_at is not None and "due_at" in raw:
+            raw["due_at"] = self._due_in_tz(args.due_at).isoformat()
         changes = {key: value for key, value in raw.items() if value is not None}
         if "due_at" in raw and raw["due_at"] is None:
             changes["due_at"] = None  # явный null — убрать срок

@@ -18,11 +18,19 @@ from jarvis.repositories.conversation import ConversationRepository
 from jarvis.services.confirmation import ConfirmationService
 
 
-async def cmd_start(message: Message) -> None:
+async def _leave_search(user_id: int, session: AsyncSession, settings: Settings) -> None:
+    await ConversationStore(
+        ConversationRepository(session), settings
+    ).clear_search_wait(user_id)
+
+
+async def cmd_start(message: Message, session: AsyncSession, settings: Settings) -> None:
+    await _leave_search(message.from_user.id, session, settings)
     await message.answer(START_TEXT, reply_markup=main_menu())
 
 
-async def cmd_help(message: Message) -> None:
+async def cmd_help(message: Message, session: AsyncSession, settings: Settings) -> None:
+    await _leave_search(message.from_user.id, session, settings)
     await message.answer(HELP_TEXT, reply_markup=main_menu())
 
 
@@ -49,19 +57,22 @@ async def cmd_search(message: Message, session: AsyncSession, settings: Settings
     await message.answer("Напишите, что искать.")
 
 
-async def cmd_tasks(message: Message) -> None:
+async def cmd_tasks(message: Message, session: AsyncSession, settings: Settings) -> None:
+    await _leave_search(message.from_user.id, session, settings)
     await message.answer("📋 <b>Задачи</b>\nВыберите список:", reply_markup=tasks_menu_keyboard())
 
 
 async def cmd_today(message: Message, session: AsyncSession, settings: Settings) -> None:
     from jarvis.bot.handlers.tasks import send_task_list
 
+    await _leave_search(message.from_user.id, session, settings)
     await send_task_list(message, session, settings, view="today", page=0)
 
 
-async def cmd_documents(message: Message, session: AsyncSession) -> None:
+async def cmd_documents(message: Message, session: AsyncSession, settings: Settings) -> None:
     from jarvis.bot.handlers.documents import send_documents_list
 
+    await _leave_search(message.from_user.id, session, settings)
     await send_documents_list(message, session, page=0)
 
 

@@ -57,11 +57,14 @@ class SearchService:
             return []
         sensitivities = allowed_sensitivities(max_sensitivity)
         hits: list[SearchHit] = []
+        # Глобальная страница режется после слияния: каждый источник отдаёт
+        # всё до конца страницы, иначе документы дублируются на второй странице.
+        fetch = offset + limit
 
         knowledge_items = await self._knowledge.search(
             query,
-            limit=limit,
-            offset=offset,
+            limit=fetch,
+            offset=0,
             allowed_sensitivities=sensitivities,
         )
         for item in knowledge_items:
@@ -75,7 +78,7 @@ class SearchService:
                 )
             )
 
-        tasks = await self._tasks.search(query, limit=limit, offset=offset)
+        tasks = await self._tasks.search(query, limit=fetch, offset=0)
         for task in tasks:
             hits.append(
                 SearchHit(
@@ -88,7 +91,7 @@ class SearchService:
             )
 
         documents = await self._documents.search_by_title(
-            query, limit=limit, allowed_sensitivities=sensitivities
+            query, limit=fetch, allowed_sensitivities=sensitivities
         )
         for document in documents:
             hits.append(
@@ -102,4 +105,4 @@ class SearchService:
             )
 
         hits.sort(key=lambda hit: hit.created_at, reverse=True)
-        return hits[: 3 * limit]
+        return hits[offset : offset + limit]

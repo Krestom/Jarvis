@@ -33,7 +33,18 @@ async def _edit_or_send(callback: CallbackQuery, text: str, markup, *, with_menu
         await message.answer(text, reply_markup=reply_markup)
 
 
-async def menu_main(callback: CallbackQuery) -> None:
+async def _leave_search(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+) -> None:
+    await ConversationStore(
+        ConversationRepository(session), settings
+    ).clear_search_wait(callback.from_user.id)
+
+
+async def menu_main(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+) -> None:
+    await _leave_search(callback, session, settings)
     await _edit_or_send(callback, "Главное меню:", markup=None, with_menu=True)
 
 
@@ -44,10 +55,13 @@ async def menu_search(callback: CallbackQuery, session: AsyncSession, settings: 
     await callback.message.answer("🔎 Напишите, что искать.")
 
 
-async def menu_tasks(callback: CallbackQuery) -> None:
+async def menu_tasks(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+) -> None:
     from jarvis.bot.handlers.render import send_or_edit
     from jarvis.bot.keyboards import tasks_menu_keyboard
 
+    await _leave_search(callback, session, settings)
     await callback.answer()
     await send_or_edit(
         callback.message,
@@ -57,16 +71,22 @@ async def menu_tasks(callback: CallbackQuery) -> None:
     )
 
 
-async def menu_knowledge(callback: CallbackQuery, session: AsyncSession) -> None:
+async def menu_knowledge(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+) -> None:
     from jarvis.bot.handlers.knowledge import send_knowledge_list
 
+    await _leave_search(callback, session, settings)
     await callback.answer()
     await send_knowledge_list(callback.message, session, page=0, edit=True)
 
 
-async def menu_documents(callback: CallbackQuery, session: AsyncSession) -> None:
+async def menu_documents(
+    callback: CallbackQuery, session: AsyncSession, settings: Settings
+) -> None:
     from jarvis.bot.handlers.documents import send_documents_list
 
+    await _leave_search(callback, session, settings)
     await callback.answer()
     await send_documents_list(callback.message, session, page=0, edit=True)
 
@@ -76,6 +96,7 @@ async def menu_secrets(
 ) -> None:
     from jarvis.bot.handlers.secrets import send_secrets_list
 
+    await _leave_search(callback, session, settings)
     await callback.answer()
     await send_secrets_list(callback.message, session, settings, page=0, edit=True)
 
@@ -141,9 +162,13 @@ async def menu_force_save(
         PendingOpType.CREATE_KNOWLEDGE,
         draft.model_dump(mode="json"),
     )
+    mcp_note = (
+        "но MCP её увидит — пароли и токены храните через /secret."
+        if settings.mcp_include_sensitive
+        else "MCP её не увидит."
+    )
     await callback.message.answer(
-        "<i>Сохраню с уровнем «чувствительная»: поиск и AI видят её только по "
-        "вашему запросу, MCP — не видит.</i>"
+        f"<i>Сохраню с уровнем «чувствительная»: вы сможете её искать сами, {mcp_note}</i>"
     )
 
 

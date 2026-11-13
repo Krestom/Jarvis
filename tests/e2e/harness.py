@@ -200,11 +200,21 @@ class BotHarness:
         current = self.current(message)
         button_data = _find_button(current.reply_markup, label)
         assert button_data is not None, f"button {label!r} not found"
+        return await self.click_data(user_id, message, button_data)
+
+    async def click_data(
+        self,
+        user_id: int,
+        message: Message,
+        data: str,
+    ) -> list[Message]:
+        """Клик по произвольному callback_data (например, кнопке старой версии)."""
+        current = self.current(message)
         callback = CallbackQuery(
             id=uuid.uuid4().hex,
             from_user=User(id=user_id, is_bot=False, first_name="Test"),
             chat_instance="1",
-            data=button_data,
+            data=data,
             message=current,
         )
         return await self._feed(

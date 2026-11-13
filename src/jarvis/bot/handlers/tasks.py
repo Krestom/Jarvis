@@ -36,7 +36,7 @@ from jarvis.repositories.audit import AuditRepository
 from jarvis.repositories.comments import TaskCommentRepository
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.tasks import TaskRepository
-from jarvis.services.tasks import TaskService
+from jarvis.services.tasks import TASK_VIEWS, TaskService
 
 
 async def build_task_list(
@@ -45,6 +45,11 @@ async def build_task_list(
     service = TaskService(session)
     now = datetime.now(UTC)
     day = None
+    if view != "date" and view not in TASK_VIEWS:
+        return (
+            "📋 <b>Задачи</b>\nКнопка устарела — выберите список заново.",
+            tasks_menu_keyboard(),
+        )
     if view == "date":
         try:
             day = date.fromisoformat(value)

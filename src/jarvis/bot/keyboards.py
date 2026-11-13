@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -94,7 +92,7 @@ def agent_entity_keyboard(candidates) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def confirm_keyboard(operation_id: str) -> InlineKeyboardMarkup:
+def confirm_keyboard(operation_id: str, *, editable: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.add(
         InlineKeyboardButton(
@@ -103,12 +101,13 @@ def confirm_keyboard(operation_id: str) -> InlineKeyboardMarkup:
             style="success",
         )
     )
-    builder.add(
-        InlineKeyboardButton(
-            text="✏️ Изменить",
-            callback_data=ConfirmCB(action="edit", op_id=operation_id).pack(),
+    if editable:
+        builder.add(
+            InlineKeyboardButton(
+                text="✏️ Изменить",
+                callback_data=ConfirmCB(action="edit", op_id=operation_id).pack(),
+            )
         )
-    )
     builder.add(
         InlineKeyboardButton(
             text="❌ Отменить",
@@ -516,23 +515,6 @@ def secret_card_keyboard(secret_id: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🔐 К списку", callback_data=MenuCB(action="secrets").pack())
     )
     builder.adjust(2, 1)
-    return builder.as_markup()
-
-
-def open_entity_keyboard(kind: str, entity_id: uuid.UUID) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    hex_id = uuid_hex(entity_id)
-    open_button = InlineKeyboardButton(text="Открыть", callback_data="")
-    if kind == "task":
-        open_button.callback_data = TaskCB(action="view", task_id=hex_id).pack()
-    elif kind == "knowledge":
-        open_button.callback_data = KbCB(action="view", item_id=hex_id).pack()
-    elif kind == "document":
-        open_button.callback_data = DocCB(action="view", doc_id=hex_id).pack()
-    builder.add(open_button)
-    builder.row(
-        InlineKeyboardButton(text="🏠 В меню", callback_data=MenuCB(action="main").pack())
-    )
     return builder.as_markup()
 
 

@@ -22,7 +22,7 @@ from jarvis.bot.keyboards import (
 )
 from jarvis.bot.ui_state import remember_task_list, stale_message
 from jarvis.config.settings import Settings
-from jarvis.conversation.engine import EngineOutcome
+from jarvis.conversation.engine import EDITABLE_PENDING_OPS, EngineOutcome
 
 EMPTY_SEARCH_TEXT = "Ничего не нашёл. Уточните запрос или сохраните это как заметку."
 
@@ -96,7 +96,12 @@ async def propose_and_send(
         user_id, operation_type, payload
     )
     preview = await render_preview(session, operation_type, payload, settings.tz)
-    await message.answer(preview, reply_markup=confirm_keyboard(operation_id))
+    await message.answer(
+        preview,
+        reply_markup=confirm_keyboard(
+            operation_id, editable=operation_type in EDITABLE_PENDING_OPS
+        ),
+    )
     return operation_id
 
 
@@ -187,8 +192,10 @@ async def send_outcome(
         )
 
     # Каждая предложенная операция — отдельное превью с кнопками подтверждения.
-    for op_id, preview in outcome.pending_ops:
-        await answer_safe(message, preview, reply_markup=confirm_keyboard(op_id))
+    for op_id, preview, editable in outcome.pending_ops:
+        await answer_safe(
+            message, preview, reply_markup=confirm_keyboard(op_id, editable=editable)
+        )
 
     if outcome.task_choices:
         await message.answer(

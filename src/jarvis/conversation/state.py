@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from jarvis.config.settings import Settings
+from jarvis.conversation.flows import Flow
 from jarvis.db.models import ConversationState
 from jarvis.repositories.conversation import ConversationRepository
 
@@ -50,3 +51,9 @@ class ConversationStore:
 
     async def clear(self, telegram_user_id: int) -> None:
         await self._repo.clear(telegram_user_id)
+
+    async def clear_search_wait(self, telegram_user_id: int) -> None:
+        """Переход в меню выключает режим «напишите, что искать»."""
+        state = await self.get_active(telegram_user_id)
+        if state is not None and state.flow == Flow.SEARCH_WAIT:
+            await self._repo.clear(telegram_user_id)

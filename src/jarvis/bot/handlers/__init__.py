@@ -17,7 +17,6 @@ def build_routers() -> list[Router]:
         menu,
         search,
         secrets,
-        stale,
         tasks,
         voice,
     )
@@ -35,5 +34,4 @@ def build_routers() -> list[Router]:
         voice.build_router(),
         agent.build_router(),
         free_text.build_router(),  # всегда последний
-        stale.build_router(),  # после всех: неизвестные/устаревшие callback'и
     ]

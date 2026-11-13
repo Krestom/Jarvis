@@ -44,6 +44,7 @@ from jarvis.repositories.conversation import ConversationRepository
 from jarvis.repositories.documents import DocumentRepository
 from jarvis.repositories.knowledge import KnowledgeRepository
 from jarvis.repositories.tasks import TaskRepository
+from jarvis.security.redaction import looks_like_secret
 from jarvis.services.confirmation import ConfirmationService
 from jarvis.services.drafts import KnowledgeDraft, TaskDraft
 from jarvis.services.improvements import ImprovementService
@@ -76,12 +77,21 @@ _DATE_LIST_PREFIX = re.compile(r"(?i)^\s*(какие|что|выведи|пок�
 # Ответы «срок не нужен» на вопрос «Нужен ли срок?» (задача без дедлайна).
 NO_DUE_ANSWERS = ("нет", "не надо", "не нужно", "без срока", "без дедлайна")
 
+# Операции, для которых «Изменить» умеет пересобрать черновик (engine._handle_edit).
+EDITABLE_PENDING_OPS = {
+    PendingOpType.CREATE_TASK,
+    PendingOpType.CREATE_KNOWLEDGE,
+    PendingOpType.UPDATE_KNOWLEDGE,
+    PendingOpType.SAVE_DOCUMENT,
+    PendingOpType.CREATE_SECRET,
+}
+
 
 @dataclass
 class EngineOutcome:
     text: str
-    # (id операции, текст превью) — на каждую операцию отдельное сообщение с кнопками.
-    pending_ops: list[tuple[str, str]] = field(default_factory=list)
+    # (id операции, текст превью, доступна ли кнопка «Изменить»).
+    pending_ops: list[tuple[str, str, bool]] = field(default_factory=list)
     search_hits: list[SearchHit] = field(default_factory=list)
     search_query: str | None = None
     search_page: int = 0
@@ -429,19 +439,27 @@ class ConversationEngine:
     ) -> EngineOutcome:
         entities = interpretation.entities
         hints = {hint.lower() for hint in interpretation.sensitivity_hints}
+        haystack = " ".join(
+            str(entities.get(key, "")) for key in ("title", "summary", "content")
+        )
 
-        if "secret" in hints or self._looks_like_secret(entities):
+        if "secret" in hints or looks_like_secret(haystack):
             await self._store.set(
                 telegram_user_id,
                 Flow.FORCE_SAVE_PENDING,
                 data={"text": text},
+            )
+            mcp_note = (
+                "но MCP её увидит — пароли и токены храните через /secret."
+                if self._settings.mcp_include_sensitive
+                else "MCP её не увидит."
             )
             return EngineOutcome(
                 "⚠️ Похоже, в сообщении есть секрет (пароль, токен или ключ).\n\n"
                 "• Надёжный вариант — отправить значение через /secret: оно "
                 "зашифруется отдельным ключом и не попадёт в AI и MCP.\n"
                 "• Либо нажмите кнопку ниже — сохраню заметкой с уровнем "
-                "«чувствительная»: вы сможете её искать сами, MCP её не увидит.\n\n"
+                f"«чувствительная»: вы сможете её искать сами, {mcp_note}\n\n"
                 "<i>В заметке текст хранится как есть — проверьте, что это ваш "
                 "личный чат и в нём нет лишнего.</i>",
                 force_save=True,
@@ -637,7 +655,12 @@ class ConversationEngine:
         preview = await render_preview(
             self._session, operation_type, payload, self._settings.tz
         )
-        return EngineOutcome("", pending_ops=[(operation_id, preview)])
+        return EngineOutcome(
+            "",
+            pending_ops=[
+                (operation_id, preview, operation_type in EDITABLE_PENDING_OPS)
+            ],
+        )
 
     async def _ask_task_due(self, telegram_user_id: int, payload: dict) -> EngineOutcome:
         """Задача без срока: сначала уточняем срок, операцию пока не создаём."""
@@ -723,14 +746,14 @@ class ConversationEngine:
 
     async def _pending_previews(
         self, telegram_user_id: int, operation_ids: list[str]
-    ) -> tuple[list[tuple[str, str]], dict | None]:
+    ) -> tuple[list[tuple[str, str, bool]], dict | None]:
         """Превью операций агента; задача без срока откладывается до ответа о сроке."""
         if not operation_ids:
             return [], None
         from jarvis.repositories.pending import PendingOperationRepository
 
         repo = PendingOperationRepository(self._session)
-        previews: list[tuple[str, str]] = []
+        previews: list[tuple[str, str, bool]] = []
         due_payload: dict | None = None
         for operation_id in operation_ids:
             operation = await repo.get(uuid.UUID(str(operation_id)))
@@ -753,7 +776,13 @@ class ConversationEngine:
                 payload,
                 self._settings.tz,
             )
-            previews.append((str(operation_id), preview))
+            previews.append(
+                (
+                    str(operation_id),
+                    preview,
+                    operation.operation_type in EDITABLE_PENDING_OPS,
+                )
+            )
         return previews, due_payload
 
     # --- Improvement backlog ---
@@ -910,7 +939,9 @@ class ConversationEngine:
             elif text.strip():
                 draft["title"] = text.strip()[:300]
             if entities.get("due_at"):
-                draft["due_at"] = entities["due_at"]
+                parsed_due = self._parse_due_at(entities["due_at"])
+                if parsed_due is not None:
+                    draft["due_at"] = parsed_due
 
         if not draft:
             return EngineOutcome(
@@ -1039,23 +1070,16 @@ class ConversationEngine:
             return None
         return parsed.date()
 
-    @staticmethod
-    def _parse_due_at(value: Any) -> datetime | None:
+    def _parse_due_at(self, value: Any) -> datetime | None:
         if not value:
             return None
         try:
             parsed = datetime.fromisoformat(str(value))
         except ValueError:
             return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=self._settings.tz)
         return parsed
-
-    @staticmethod
-    def _looks_like_secret(entities: dict[str, Any]) -> bool:
-        haystack = " ".join(
-            str(entities.get(key, "")) for key in ("title", "summary", "content")
-        ).lower()
-        markers = ("password=", "token=", "api_key", "apikey", "ssh-rsa", "private key")
-        return any(marker in haystack for marker in markers)
 
     def _menu_flag(self) -> bool:
         return True
