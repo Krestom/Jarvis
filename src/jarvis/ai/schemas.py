@@ -87,7 +87,7 @@ class ScreenRequest(BaseModel):
     """
 
     component: Literal["screen"]
-    name: Literal["tasks", "search", "documents", "knowledge", "card"]
+    name: Literal["tasks", "search", "documents", "knowledge", "card", "weather"]
     params: dict[str, Any] = Field(default_factory=dict)
 
 

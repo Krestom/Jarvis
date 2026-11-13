@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -10,6 +11,13 @@ from jarvis.domain.enums import TaskStatus
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import TaskDraft
 from jarvis.services.tasks import TaskService
+from jarvis.weather.provider import (
+    CurrentWeather,
+    DailyWeather,
+    HourlyPoint,
+    WeatherSnapshot,
+    WeatherUnavailable,
+)
 from jarvis.workers.notifier import run_notifier_once
 
 pytestmark = pytest.mark.integration
@@ -393,3 +401,145 @@ async def test_failed_send_keeps_marks_and_retries(
     third = await run_notifier_once(session_factory, test_settings, _send)
     assert third["due"] == 0
     assert len(sent) == 2
+
+
+class _FakeWeather:
+    name = "fake"
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self._error = error
+
+    async def fetch(self) -> WeatherSnapshot:
+        if self._error is not None:
+            raise self._error
+        return _weather_snapshot()
+
+
+def _weather_snapshot() -> WeatherSnapshot:
+    tz = ZoneInfo("Europe/Moscow")
+    now = datetime(2026, 11, 13, 8, 0, tzinfo=tz)
+    return WeatherSnapshot(
+        city="Москва",
+        current=CurrentWeather(-3.4, -8.1, 78, 0.0, 71, 5.0, 9.0, 240, 1012.5, True),
+        hourly=tuple(
+            HourlyPoint(
+                now + timedelta(hours=index),
+                -3.4 - index * 0.3,
+                20 + index * 5,
+                0.0,
+                71 if index < 3 else 3,
+                5.0,
+                True,
+            )
+            for index in range(8)
+        ),
+        daily=(
+            DailyWeather(
+                now.date(),
+                71,
+                -1.0,
+                -6.2,
+                now.replace(hour=7, minute=58),
+                now.replace(hour=16, minute=20),
+                70,
+                6.0,
+            ),
+            DailyWeather(
+                now.date() + timedelta(days=1),
+                3,
+                0.5,
+                -3.0,
+                now.replace(hour=8, minute=0),
+                now.replace(hour=16, minute=18),
+                20,
+                4.0,
+            ),
+        ),
+        fetched_at=now,
+    )
+
+
+async def test_morning_digest_sends_weather_widget(test_settings, session_factory):
+    test_settings.notify_enabled = True
+    test_settings.notify_due_reminders = False
+    test_settings.notify_digest_times = "08:00"
+    now = datetime(2026, 11, 13, 8, 0, tzinfo=test_settings.tz)
+
+    texts: list[str] = []
+    widgets: list = []
+
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
+        texts.append(text)
+
+    async def _send_widget(chat_id: int, payload) -> None:
+        widgets.append(payload)
+
+    stats = await run_notifier_once(
+        session_factory,
+        test_settings,
+        _send,
+        now=now,
+        send_widget=_send_widget,
+        weather_provider=_FakeWeather(),
+    )
+    assert stats["digest"] == 1
+    assert len(widgets) == 1
+    assert "Доброе утро" in widgets[0].caption
+    assert texts == []
+
+
+async def test_later_digest_has_no_weather(test_settings, session_factory):
+    test_settings.notify_enabled = True
+    test_settings.notify_due_reminders = False
+    test_settings.notify_digest_times = "08:00,12:00"
+    now = datetime(2026, 11, 13, 12, 0, tzinfo=test_settings.tz)
+
+    texts: list[str] = []
+    widgets: list = []
+
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
+        texts.append(text)
+
+    async def _send_widget(chat_id: int, payload) -> None:
+        widgets.append(payload)
+
+    stats = await run_notifier_once(
+        session_factory,
+        test_settings,
+        _send,
+        now=now,
+        send_widget=_send_widget,
+        weather_provider=_FakeWeather(),
+    )
+    assert stats["digest"] == 1
+    assert widgets == []
+    assert len(texts) == 1
+
+
+async def test_weather_failure_falls_back_to_text(test_settings, session_factory):
+    test_settings.notify_enabled = True
+    test_settings.notify_due_reminders = False
+    test_settings.notify_digest_times = "08:00"
+    now = datetime(2026, 11, 13, 8, 0, tzinfo=test_settings.tz)
+
+    texts: list[str] = []
+    widgets: list = []
+
+    async def _send(chat_id: int, text: str, reply_markup=None) -> None:
+        texts.append(text)
+
+    async def _send_widget(chat_id: int, payload) -> None:
+        widgets.append(payload)
+
+    stats = await run_notifier_once(
+        session_factory,
+        test_settings,
+        _send,
+        now=now,
+        send_widget=_send_widget,
+        weather_provider=_FakeWeather(WeatherUnavailable("down")),
+    )
+    assert stats["digest"] == 1
+    assert widgets == []
+    assert len(texts) == 1
+    assert "Доброе утро" in texts[0]

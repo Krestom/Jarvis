@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jarvis.ai import AIError, AIProvider, AIUnavailableError, InterpreterContext
 from jarvis.ai.prompts import format_llm_text
 from jarvis.ai.schemas import Interpretation
+from jarvis.bot.widgets.types import WidgetPayload
+from jarvis.bot.widgets.weather import WidgetTooLarge, render_weather_widget
 from jarvis.config.settings import Settings
 from jarvis.conversation.dates import parse_human_date
 from jarvis.conversation.flows import Flow
@@ -50,6 +52,9 @@ from jarvis.services.drafts import KnowledgeDraft, TaskDraft
 from jarvis.services.improvements import ImprovementService
 from jarvis.services.search import SearchHit, SearchService
 from jarvis.services.tasks import TASK_VIEWS, TaskService
+from jarvis.weather import create_weather_provider
+from jarvis.weather.none import NoneWeatherProvider
+from jarvis.weather.provider import WeatherUnavailable
 
 if TYPE_CHECKING:
     from jarvis.agent.queue import UserSessionGate
@@ -115,6 +120,8 @@ class EngineOutcome:
     task_page: tuple[str, int, str, bool] | None = None
     # Карточка сущности, которую просит открыть агент: (kind, id).
     card: tuple[str, str] | None = None
+    # Готовый виджет (погода), который отправляется вместе с ответом/вместо текста.
+    widget: WidgetPayload | None = None
 
 
 class ConversationEngine:
@@ -126,12 +133,18 @@ class ConversationEngine:
         *,
         gate: UserSessionGate | None = None,
         search_provider=None,
+        weather_provider=None,
     ) -> None:
         self._session = session
         self._settings = settings
         self._ai = ai
         self._gate = gate
         self._search_provider = search_provider
+        try:
+            self._weather = weather_provider or create_weather_provider(settings)
+        except ValueError as error:
+            log.error("weather provider is misconfigured, weather disabled: %s", error)
+            self._weather = NoneWeatherProvider()
         self._store = ConversationStore(ConversationRepository(session), settings)
         self._confirmation = ConfirmationService(session, settings)
         self._search = SearchService(session)
@@ -501,6 +514,17 @@ class ConversationEngine:
             return await self._show_documents()
         if name == "knowledge":
             return await self._show_knowledge_list()
+        if name == "weather":
+            try:
+                snapshot = await self._weather.fetch()
+                widget = render_weather_widget(snapshot)
+            except (WeatherUnavailable, WidgetTooLarge) as error:
+                log.warning("weather screen is unavailable: %s", error)
+                return EngineOutcome(
+                    "Погода сейчас недоступна. Попробуйте позже.",
+                    menu=self._menu_flag(),
+                )
+            return EngineOutcome("", widget=widget)
         if name == "card":
             return EngineOutcome(
                 "", card=(str(params.get("kind") or ""), str(params.get("id") or ""))
@@ -709,6 +733,7 @@ class ConversationEngine:
             self._ai,
             gate=self._gate,
             search_provider=self._search_provider,
+            weather_provider=self._weather,
             correlation_id=get_correlation_id(),
         )
         try:

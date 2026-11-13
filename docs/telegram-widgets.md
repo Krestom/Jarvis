@@ -1,6 +1,7 @@
 # Telegram HTML-виджеты (Bot API 10.4)
 
-Обновлено: 2026-11-12. Статус: исследование, в коде Jarvis пока не используется.
+Обновлено: 2026-11-12. Статус: механизм используется для карточки погоды
+(2026-11-13); остальные сценарии — исследование.
 
 Документ описывает механизм Telegram-виджетов: что это, как устроено,
 какие у них ограничения, где они работают в продакшене и что важно учесть
@@ -615,3 +616,18 @@ Issue [#2006](https://github.com/aiogram/aiogram/issues/2006) открыт.
 - [widgetgram — Bot API 10.4 для aiogram 3](https://github.com/krendel001/widgetgram)
 - [TG Widget Kit — playground](https://github.com/advanceddev/telegram-widget-kit)
 - [aiogram issue #2006 — поддержка 10.4](https://github.com/aiogram/aiogram/issues/2006)
+
+## 14. Watch list: нативная поддержка в aiogram
+
+Пока aiogram не умеет Bot API 10.4, Jarvis отправляет виджеты кастомным
+`SendWidget` (`src/jarvis/bot/methods.py`). Проверять:
+
+- PR <https://github.com/aiogram/aiogram/pull/2004> — Bot API 10.4, 3.32.0;
+- issue <https://github.com/aiogram/aiogram/issues/2006>.
+
+Когда появится `Bot.send_widget`:
+
+1. заменить кастомный `SendWidget` на нативный вызов;
+2. удалить `tests/unit/test_aiogram_widget_watch.py` (canary специально
+   упадёт и напомнит);
+3. обновить этот раздел и `docs/status.md`.

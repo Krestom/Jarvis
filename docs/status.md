@@ -98,6 +98,10 @@
 2. Раз в квартал — тестовое восстановление бэкапа (`scripts/restore.sh`);
    первое восстановление выполнено 2026-10-17 (изолированный проект
    `jarvis-restore-test`, счётчики совпали, teardown выполнен).
+3. Проверять aiogram на нативную поддержку виджетов Bot API 10.4:
+   PR #2004 / 3.32. Когда появится `Bot.send_widget`, удалить кастомный
+   `SendWidget` (`src/jarvis/bot/methods.py`) и canary-тест
+   `tests/unit/test_aiogram_widget_watch.py`.
 
 ## Известные ограничения (осознанные, не баги)
 

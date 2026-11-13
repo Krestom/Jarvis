@@ -116,6 +116,15 @@ class Settings(BaseSettings):
     # Ключ Tavily для WEB_SEARCH_PROVIDER=tavily.
     tavily_api_key: SecretStr = SecretStr("")
 
+    # --- Погода (Open-Meteo, без ключа) ---
+    # none | open-meteo
+    weather_provider: str = "none"
+    weather_city: str = "Москва"
+    weather_latitude: float = 55.7558
+    weather_longitude: float = 37.6173
+    weather_timezone: str = "Europe/Moscow"
+    weather_timeout_seconds: float = 5.0
+
     # --- Уведомления (напоминания о сроках, сводки) ---
     notify_enabled: bool = True
     notify_due_reminders: bool = True
@@ -144,7 +153,7 @@ class Settings(BaseSettings):
             return [int(part) for part in value.split(",") if part.strip()]
         return value
 
-    @field_validator("app_timezone")
+    @field_validator("app_timezone", "weather_timezone")
     @classmethod
     def _check_timezone(cls, value: str) -> str:
         try:

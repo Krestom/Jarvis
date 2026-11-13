@@ -22,7 +22,12 @@ from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.drafts import TaskDraft
 from jarvis.services.tasks import TaskService
 from tests.e2e.harness import DEFAULT_USER_ID
-from tests.e2e.test_scenarios import confirm_last, keyboard_messages, make_harness
+from tests.e2e.test_scenarios import (
+    _FakeWeather,
+    confirm_last,
+    keyboard_messages,
+    make_harness,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -374,6 +379,31 @@ async def test_agent_opens_tasks_screen(test_settings, session_factory, session)
     assert "📆 На этой неделе" in combined  # единый вид списков (как в меню)
     assert "Починить сервер" in combined
     assert keyboard_messages(messages)  # кликабельные карточки
+
+
+async def test_agent_opens_weather_screen(
+    test_settings, session_factory, session, monkeypatch
+):
+    from jarvis.conversation import engine as engine_module
+
+    monkeypatch.setattr(
+        engine_module, "create_weather_provider", lambda settings: _FakeWeather()
+    )
+    ai = FakeProvider()
+    ai.queue_plan(
+        PlanStep(
+            type="reply",
+            text="Показываю погоду.",
+            ui=ScreenRequest(component="screen", name="weather", params={}),
+        )
+    )
+    harness = await make_harness(test_settings, session_factory, ai=ai)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "Джарвис, какая погода?")
+
+    widgets = [m for m in messages if (m.model_extra or {}).get("widget")]
+    assert len(widgets) == 1
+    assert "Open-Meteo" in widgets[0].model_extra["widget"]["html"]
 
 
 async def test_agent_opens_search_screen(test_settings, session_factory, session):

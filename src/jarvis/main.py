@@ -14,11 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from jarvis import __version__
 from jarvis.ai import NoneProvider, create_ai_provider
 from jarvis.bot.app import create_bot, create_dispatcher, setup_bot_commands
+from jarvis.bot.widgets.send import send_widget
+from jarvis.bot.widgets.types import WidgetPayload
 from jarvis.config.settings import Settings, get_settings
 from jarvis.db.session import create_engine, create_session_factory
 from jarvis.health import create_health_app
 from jarvis.logging_setup import setup_logging
 from jarvis.transcription import create_transcription_provider
+from jarvis.weather import create_weather_provider
 from jarvis.workers.cleanup import cleanup_loop
 from jarvis.workers.notifier import notifier_loop
 
@@ -127,8 +130,25 @@ async def amain() -> int:
         ) -> None:
             await bot.send_message(chat_id, text, parse_mode=None, reply_markup=reply_markup)
 
+        try:
+            weather_provider = create_weather_provider(settings)
+        except ValueError as error:
+            log.error("weather provider is misconfigured, weather disabled: %s", error)
+            weather_provider = None
+
+        async def _send_widget(chat_id: int, payload: WidgetPayload) -> None:
+            await send_widget(bot, chat_id, payload)
+
         notifier_task = asyncio.create_task(
-            notifier_loop(session_factory, settings, stop, _notify), name="notifier"
+            notifier_loop(
+                session_factory,
+                settings,
+                stop,
+                _notify,
+                send_widget=_send_widget,
+                weather_provider=weather_provider,
+            ),
+            name="notifier",
         )
 
     log.info(

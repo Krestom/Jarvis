@@ -85,6 +85,18 @@ class FakeTelegramSession(BaseSession):
             self.sent_messages.append(message)
             self.tracker.note(int(method.chat_id), message.message_id)
             return message
+        if name == "SendWidget":
+            self._message_id += 1
+            message = Message(
+                message_id=self._message_id,
+                date=datetime.now(UTC),
+                chat=Chat(id=int(method.chat_id), type="private"),
+                from_user=BOT_USER,
+                widget={"id": f"widget-{self._message_id}", "html": method.html},
+            )
+            self.sent_messages.append(message)
+            self.tracker.note(int(method.chat_id), message.message_id)
+            return message
         if name in ("EditMessageText", "EditMessageReplyMarkup"):
             # Правим сохранённое сообщение, чтобы кнопки после edit_text
             # оставались доступны для следующих кликов в тестах.

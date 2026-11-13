@@ -34,11 +34,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jarvis.bot.callbacks import uuid_hex
 from jarvis.bot.keyboards import reminder_keyboard
+from jarvis.bot.widgets.types import WidgetPayload
+from jarvis.bot.widgets.weather import render_weather_widget
 from jarvis.config.settings import Settings
 from jarvis.db.session import session_scope
 from jarvis.repositories.notifications import NotificationRepository
 from jarvis.repositories.tasks import TaskRepository
 from jarvis.services.tasks import TaskService
+from jarvis.weather.provider import WeatherProvider, WeatherUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +52,7 @@ DIGEST_WINDOW_MINUTES = 30
 EVENING_HOUR = 20  # сводки в 20:00 и позже — расширенный вечерний формат
 
 SendMessage = Callable[[int, str, InlineKeyboardMarkup | None], Awaitable[None]]
+SendWidgetMessage = Callable[[int, WidgetPayload], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,7 @@ class Outgoing:
     ref: str
     text: str
     markup: InlineKeyboardMarkup | None = None
+    wants_weather: bool = False
 
 
 def parse_digest_time(raw: str) -> time | None:
@@ -106,6 +111,8 @@ async def run_notifier_once(
     send: SendMessage,
     *,
     now: datetime | None = None,
+    send_widget: SendWidgetMessage | None = None,
+    weather_provider: WeatherProvider | None = None,
 ) -> dict[str, int]:
     """Один проход планировщика. Возвращает счётчики отправленных уведомлений.
 
@@ -119,6 +126,8 @@ async def run_notifier_once(
     owner = settings.telegram_allowed_user_ids[0]
     now = now or datetime.now(UTC)
     local_now = now.astimezone(settings.tz)
+    digest_times = parse_digest_times(settings.notify_digest_times)
+    morning_digest = min(digest_times) if digest_times else None
     to_send: list[Outgoing] = []
     async with session_scope(session_factory) as session:
         repo = NotificationRepository(session)
@@ -162,7 +171,7 @@ async def run_notifier_once(
                 )
                 sent += 1
 
-        for digest_at in parse_digest_times(settings.notify_digest_times):
+        for digest_at in digest_times:
             minutes_now = local_now.hour * 60 + local_now.minute
             minutes_digest = digest_at.hour * 60 + digest_at.minute
             # Учитываем переход через полночь: окно после времени сводки.
@@ -173,22 +182,47 @@ async def run_notifier_once(
             if not await repo.mark_if_new("digest", ref):
                 continue
             text = await _digest_text(session, settings, local_now, digest_at)
-            to_send.append(Outgoing("digest", ref, text, None))
+            wants_weather = (
+                morning_digest is not None
+                and digest_at == morning_digest
+                and digest_at.hour < 12
+            )
+            to_send.append(
+                Outgoing("digest", ref, text, None, wants_weather=wants_weather)
+            )
 
     stats = {"due": 0, "due_soon": 0, "digest": 0}
     for item in to_send:
-        try:
-            await send(owner, item.text, item.markup)
-        except Exception:  # noqa: BLE001 - отправка повторится в следующий проход
-            log.exception("notifier: failed to send %s %s", item.kind, item.ref)
+        sent = False
+        if (
+            item.kind == "digest"
+            and item.wants_weather
+            and send_widget is not None
+            and weather_provider is not None
+        ):
             try:
-                async with session_scope(session_factory) as session:
-                    await NotificationRepository(session).unmark(
-                        item.kind, item.ref
-                    )
-            except Exception:  # noqa: BLE001 - сбой снятия отметки не рвёт проход
-                log.exception("notifier: failed to unmark %s %s", item.kind, item.ref)
-            continue
+                snapshot = await weather_provider.fetch()
+                payload = render_weather_widget(snapshot, caption=item.text)
+                await send_widget(owner, payload)
+            except WeatherUnavailable as error:
+                log.warning("notifier: weather unavailable for %s: %s", item.ref, error)
+            except Exception:  # noqa: BLE001 - сводка важнее погоды
+                log.exception("notifier: weather widget failed for %s", item.ref)
+            else:
+                sent = True
+        if not sent:
+            try:
+                await send(owner, item.text, item.markup)
+            except Exception:  # noqa: BLE001 - отправка повторится в следующий проход
+                log.exception("notifier: failed to send %s %s", item.kind, item.ref)
+                try:
+                    async with session_scope(session_factory) as session:
+                        await NotificationRepository(session).unmark(
+                            item.kind, item.ref
+                        )
+                except Exception:  # noqa: BLE001 - сбой снятия отметки не рвёт проход
+                    log.exception("notifier: failed to unmark %s %s", item.kind, item.ref)
+                continue
         if item.kind == "digest":
             stats["digest"] += 1
         elif item.kind == "task_due_soon":
@@ -273,11 +307,20 @@ async def notifier_loop(
     settings: Settings,
     stop: asyncio.Event,
     send: SendMessage,
+    *,
+    send_widget: SendWidgetMessage | None = None,
+    weather_provider: WeatherProvider | None = None,
 ) -> None:
     interval = min(max(settings.notify_poll_seconds, 30), 3600)
     while not stop.is_set():
         try:
-            stats = await run_notifier_once(session_factory, settings, send)
+            stats = await run_notifier_once(
+                session_factory,
+                settings,
+                send,
+                send_widget=send_widget,
+                weather_provider=weather_provider,
+            )
             if any(stats.values()):
                 log.info("notifier: %s", stats)
         except Exception:  # noqa: BLE001 - цикл не должен умирать от разовой ошибки

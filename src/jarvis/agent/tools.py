@@ -43,6 +43,9 @@ from jarvis.services.errors import NotFoundError, OperationError
 from jarvis.services.improvements import ImprovementService
 from jarvis.services.search import SearchService
 from jarvis.services.tasks import TASK_VIEWS, TaskService
+from jarvis.weather.codes import describe_weather_code
+from jarvis.weather.none import NoneWeatherProvider
+from jarvis.weather.provider import WeatherProvider, WeatherUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -260,6 +263,10 @@ class UpdateDocumentArgs(BaseModel):
     )
 
 
+class GetWeatherArgs(BaseModel):
+    """Погода по координатам из настроек: аргументов не требуется."""
+
+
 @dataclass(frozen=True)
 class ToolMeta:
     args_model: type[BaseModel]
@@ -376,6 +383,14 @@ _TOOLS: dict[str, ToolMeta] = {
         mutating=False,
         risk="low",
     ),
+    "get_weather": ToolMeta(
+        GetWeatherArgs,
+        "Актуальная погода в городе из настроек (Open-Meteo): сейчас, ближайшие "
+        "часы, максимум/минимум, восход и закат. Для красивой карточки в чате "
+        "используй UI screen weather; этот инструмент — для текстовых ответов.",
+        mutating=False,
+        risk="low",
+    ),
     "report_capability_gap": ToolMeta(
         ReportGapArgs,
         "Записать в improvement backlog объективно отсутствующую возможность Jarvis. "
@@ -457,12 +472,14 @@ class ToolRegistry:
         *,
         telegram_user_id: int,
         search_provider: WebSearchProvider,
+        weather_provider: WeatherProvider | None = None,
         correlation_id: str | None = None,
     ) -> None:
         self._session = session
         self._settings = settings
         self._user_id = telegram_user_id
         self._search_provider = search_provider
+        self._weather = weather_provider or NoneWeatherProvider()
         self._correlation_id = correlation_id
         self.surfaced: list[EntityCandidate] = []
         # Все pending-операции, предложенные за этот запрос (каждой нужна кнопка).
@@ -836,6 +853,38 @@ class ToolRegistry:
                 "results": [
                     {"title": result.title, "url": result.url, "snippet": result.snippet}
                     for result in results
+                ],
+            },
+        )
+
+    async def _get_weather(self, _args: GetWeatherArgs) -> ToolResult:
+        try:
+            snapshot = await self._weather.fetch()
+        except WeatherUnavailable as error:
+            return ToolResult.failure("unsupported", str(error))
+        today = snapshot.daily[0]
+        label, _ = describe_weather_code(snapshot.current.weather_code)
+        return ToolResult(
+            ok=True,
+            data={
+                "city": snapshot.city,
+                "temperature_c": round(snapshot.current.temperature_c, 1),
+                "feels_like_c": round(snapshot.current.feels_like_c, 1),
+                "condition": label,
+                "high_c": round(today.high_c, 1),
+                "low_c": round(today.low_c, 1),
+                "wind_ms": round(snapshot.current.wind_speed_ms, 1),
+                "humidity_pct": snapshot.current.humidity_pct,
+                "precipitation_probability_pct": today.precipitation_probability_pct,
+                "sunrise": f"{today.sunrise:%H:%M}",
+                "sunset": f"{today.sunset:%H:%M}",
+                "next_hours": [
+                    {
+                        "time": f"{point.time:%H:%M}",
+                        "temperature_c": round(point.temperature_c, 1),
+                        "condition": describe_weather_code(point.weather_code)[0],
+                    }
+                    for point in snapshot.hourly[:6]
                 ],
             },
         )

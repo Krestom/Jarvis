@@ -34,6 +34,9 @@ from jarvis.repositories.tasks import TaskRepository
 from jarvis.research import create_search_provider
 from jarvis.research.provider import WebSearchProvider
 from jarvis.services.tasks import TASK_VIEWS
+from jarvis.weather import create_weather_provider
+from jarvis.weather.none import NoneWeatherProvider
+from jarvis.weather.provider import WeatherProvider
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +78,7 @@ class AgentService:
         *,
         gate: UserSessionGate,
         search_provider: WebSearchProvider | None = None,
+        weather_provider: WeatherProvider | None = None,
         correlation_id: str | None = None,
     ) -> None:
         self._session = session
@@ -82,6 +86,11 @@ class AgentService:
         self._ai = ai
         self._gate = gate
         self._search_provider = search_provider or create_search_provider(settings)
+        try:
+            self._weather_provider = weather_provider or create_weather_provider(settings)
+        except ValueError as error:
+            log.error("weather provider is misconfigured, weather disabled: %s", error)
+            self._weather_provider = NoneWeatherProvider()
         self._correlation_id = correlation_id
         self._store = ConversationStore(ConversationRepository(session), settings)
 
@@ -136,6 +145,7 @@ class AgentService:
             settings,
             telegram_user_id=telegram_user_id,
             search_provider=self._search_provider,
+            weather_provider=self._weather_provider,
             correlation_id=self._correlation_id,
         )
         stored = await self._stored_context(telegram_user_id)
@@ -355,6 +365,8 @@ class AgentService:
             return ("documents", {})
         if ui.name == "knowledge":
             return ("knowledge", {})
+        if ui.name == "weather":
+            return ("weather", {})
         if ui.name == "card":
             kind = str(params.get("kind") or "").strip()
             if kind not in ("task", "knowledge", "document"):

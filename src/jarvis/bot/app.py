@@ -31,6 +31,7 @@ BOT_COMMANDS = [
     BotCommand(command="search", description="Поиск по базе"),
     BotCommand(command="tasks", description="Задачи"),
     BotCommand(command="today", description="Задачи на сегодня"),
+    BotCommand(command="weather", description="Погода"),
     BotCommand(command="documents", description="Документы"),
     BotCommand(command="secret", description="Секреты"),
     BotCommand(command="diagnostics", description="Диагностика и backlog"),

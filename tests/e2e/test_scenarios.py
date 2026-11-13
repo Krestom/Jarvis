@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from aiogram import Router
@@ -34,6 +35,12 @@ from jarvis.services.improvements import ImprovementService
 from jarvis.services.secrets import SecretService
 from jarvis.services.tasks import TaskService
 from jarvis.transcription.fake import FakeTranscription
+from jarvis.weather.provider import (
+    CurrentWeather,
+    DailyWeather,
+    HourlyPoint,
+    WeatherSnapshot,
+)
 from tests.e2e.harness import DEFAULT_USER_ID, BotHarness, FakeTelegramSession
 
 pytestmark = pytest.mark.integration
@@ -1072,3 +1079,61 @@ async def test_scenario_tasks_on_named_date(classic_settings, session_factory, s
 
 
 # 21. Категории-папки задач: просмотр задач по категории.
+
+
+class _FakeWeather:
+    name = "fake"
+
+    async def fetch(self) -> WeatherSnapshot:
+        tz = ZoneInfo("Europe/Moscow")
+        now = datetime(2026, 11, 13, 8, 0, tzinfo=tz)
+        return WeatherSnapshot(
+            city="Москва",
+            current=CurrentWeather(-3.4, -8.1, 78, 0.0, 71, 5.0, 9.0, 240, 1012.5, True),
+            hourly=tuple(
+                HourlyPoint(
+                    now + timedelta(hours=index),
+                    -3.0 - index,
+                    20 + index * 5,
+                    0.0,
+                    71 if index < 3 else 3,
+                    5.0,
+                    True,
+                )
+                for index in range(8)
+            ),
+            daily=(
+                DailyWeather(
+                    now.date(),
+                    71,
+                    -1.0,
+                    -6.2,
+                    now.replace(hour=7, minute=58),
+                    now.replace(hour=16, minute=20),
+                    70,
+                    6.0,
+                ),
+            ),
+            fetched_at=now,
+        )
+
+
+async def test_weather_command_sends_widget(
+    classic_settings, session_factory, monkeypatch
+):
+    from jarvis.bot.handlers import commands as commands_module
+    from jarvis.bot.methods import SendWidget
+
+    monkeypatch.setattr(
+        commands_module, "create_weather_provider", lambda settings: _FakeWeather()
+    )
+    harness = await make_harness(classic_settings, session_factory)
+
+    messages = await harness.send_text(DEFAULT_USER_ID, "/weather")
+
+    widgets = [m for m in messages if (m.model_extra or {}).get("widget")]
+    assert len(widgets) == 1
+    sent = [request for request in harness.session.requests if isinstance(request, SendWidget)]
+    assert len(sent) == 1
+    assert sent[0].caption and "Погода" in sent[0].caption
+    assert "Open-Meteo" in sent[0].html

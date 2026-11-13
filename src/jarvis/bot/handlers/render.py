@@ -108,6 +108,20 @@ async def propose_and_send(
 async def send_outcome(
     message: Message, outcome: EngineOutcome, session: AsyncSession, settings: Settings
 ) -> None:
+    if outcome.widget is not None:
+        from jarvis.bot.widgets.send import send_widget
+
+        try:
+            await send_widget(message.bot, message.chat.id, outcome.widget)
+        except Exception:  # noqa: BLE001 - виджет не должен терять ответ
+            log.exception("failed to send widget, falling back to caption")
+            await answer_safe(
+                message,
+                outcome.widget.caption or outcome.text or "…",
+                reply_markup=main_menu(),
+            )
+        return
+
     if outcome.search_query is not None:
         await send_search_results(message, outcome)
         return

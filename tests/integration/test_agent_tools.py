@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -25,6 +27,12 @@ from jarvis.research.none import NoneSearchProvider
 from jarvis.research.provider import WebSearchResult
 from jarvis.services.drafts import TaskDraft
 from jarvis.services.tasks import TaskService
+from jarvis.weather.provider import (
+    CurrentWeather,
+    DailyWeather,
+    HourlyPoint,
+    WeatherSnapshot,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -580,3 +588,66 @@ async def test_update_improvement_tool_changes_status_directly(session, test_set
         "update_improvement", {"item_id": str(item.id), "status": "nonsense"}
     )
     assert bad.ok is False and bad.error_kind == "validation"
+
+
+class _FakeWeather:
+    name = "fake"
+
+    async def fetch(self) -> WeatherSnapshot:
+        tz = ZoneInfo("Europe/Moscow")
+        now = datetime(2026, 11, 13, 8, 0, tzinfo=tz)
+        return WeatherSnapshot(
+            city="Москва",
+            current=CurrentWeather(-3.4, -8.1, 78, 0.0, 71, 5.0, 9.0, 240, 1012.5, True),
+            hourly=tuple(
+                HourlyPoint(
+                    now + timedelta(hours=index),
+                    -3.0 - index,
+                    20 + index * 5,
+                    0.0,
+                    71,
+                    5.0,
+                    True,
+                )
+                for index in range(8)
+            ),
+            daily=(
+                DailyWeather(
+                    now.date(),
+                    71,
+                    -1.0,
+                    -6.2,
+                    now.replace(hour=7, minute=58),
+                    now.replace(hour=16, minute=20),
+                    70,
+                    6.0,
+                ),
+            ),
+            fetched_at=now,
+        )
+
+
+async def test_get_weather_returns_snapshot(session, test_settings):
+    registry = ToolRegistry(
+        session,
+        test_settings,
+        telegram_user_id=USER,
+        search_provider=NoneSearchProvider(),
+        weather_provider=_FakeWeather(),
+    )
+
+    result = await registry.call("get_weather", {})
+
+    assert result.ok is True
+    assert result.data["city"] == "Москва"
+    assert result.data["condition"] == "Небольшой снег"
+    assert len(result.data["next_hours"]) == 6
+
+
+async def test_get_weather_without_provider_is_unsupported(session, test_settings):
+    registry = make_registry(session, test_settings)
+
+    result = await registry.call("get_weather", {})
+
+    assert result.ok is False
+    assert result.error_kind == "unsupported"

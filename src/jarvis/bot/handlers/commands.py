@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
@@ -11,11 +13,17 @@ from jarvis.agent.queue import UserSessionGate
 from jarvis.ai import AIProvider
 from jarvis.bot.keyboards import main_menu, tasks_menu_keyboard
 from jarvis.bot.texts import CANCELLED_TEXT, HELP_TEXT, START_TEXT
+from jarvis.bot.widgets.send import send_widget
+from jarvis.bot.widgets.weather import WidgetTooLarge, render_weather_widget
 from jarvis.config.settings import Settings
 from jarvis.conversation.flows import Flow
 from jarvis.conversation.state import ConversationStore
 from jarvis.repositories.conversation import ConversationRepository
 from jarvis.services.confirmation import ConfirmationService
+from jarvis.weather import create_weather_provider
+from jarvis.weather.provider import WeatherUnavailable
+
+log = logging.getLogger(__name__)
 
 
 async def _leave_search(user_id: int, session: AsyncSession, settings: Settings) -> None:
@@ -69,6 +77,24 @@ async def cmd_today(message: Message, session: AsyncSession, settings: Settings)
     await send_task_list(message, session, settings, view="today", page=0)
 
 
+async def cmd_weather(message: Message, session: AsyncSession, settings: Settings) -> None:
+    await _leave_search(message.from_user.id, session, settings)
+    try:
+        snapshot = await create_weather_provider(settings).fetch()
+        payload = render_weather_widget(snapshot)
+    except (WeatherUnavailable, WidgetTooLarge, ValueError) as error:
+        log.warning("weather is unavailable: %s", error)
+        await message.answer(
+            "Погода сейчас недоступна. Попробуйте позже.", reply_markup=main_menu()
+        )
+        return
+    try:
+        await send_widget(message.bot, message.chat.id, payload)
+    except Exception:  # noqa: BLE001 - виджет не должен терять ответ
+        log.exception("failed to send weather widget")
+        await message.answer(payload.caption, reply_markup=main_menu())
+
+
 async def cmd_documents(message: Message, session: AsyncSession, settings: Settings) -> None:
     from jarvis.bot.handlers.documents import send_documents_list
 
@@ -92,6 +118,7 @@ def build_router() -> Router:
     router.message.register(cmd_search, Command("search"))
     router.message.register(cmd_tasks, Command("tasks"))
     router.message.register(cmd_today, Command("today"))
+    router.message.register(cmd_weather, Command("weather"))
     router.message.register(cmd_documents, Command("documents"))
     router.message.register(cmd_secret, Command("secret"))
     return router
